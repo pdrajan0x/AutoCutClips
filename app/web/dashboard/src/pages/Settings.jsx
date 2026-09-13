@@ -92,7 +92,7 @@ function Settings() {
       <div className="page-header">
         <div>
           <h2>Settings</h2>
-          <p>Konfigurasi API keys dan default settings</p>
+          <p>Configure API keys and default settings</p>
         </div>
       </div>
 

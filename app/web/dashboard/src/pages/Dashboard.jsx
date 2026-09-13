@@ -57,7 +57,7 @@ function Dashboard() {
       <div className="page-header">
         <div>
           <h2>Dashboard</h2>
-          <p>Overview semua clipping jobs</p>
+          <p>Overview of all clipping jobs</p>
         </div>
         <Link to="/new" className="btn btn-primary">
           ➕ New Job

@@ -183,7 +183,7 @@ function NewJob() {
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                 />
-                <p className="form-hint">Mendukung YouTube, TikTok, Instagram, Google Drive</p>
+                <p className="form-hint">Supports YouTube, TikTok, Instagram, Google Drive</p>
               </div>
               <div className="form-group" style={{ maxWidth: '200px' }}>
                 <label className="form-label">Platform</label>
