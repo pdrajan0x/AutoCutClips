@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import mediapipe as mp
 
+from ..progress import ProgressBar
 from .broll import crop_center_broll
 from .face_detection import get_face_detector
 from .utils import format_seconds, _resize_frame, _get_render_dims
@@ -183,7 +184,7 @@ def render_split_screen_video(
     solo_counts: dict[str, int] = {spk: 0 for spk in all_speakers_in_clip}
     multi_counts: dict[str, int] = {spk: 0 for spk in all_speakers_in_clip}
     current_time = 0.0
-    last_detect_percent = -1
+    detect_bar = ProgressBar(duration, f"{label} - Face analysis")
 
     def _clamp_x(cx_center: float) -> int:
         return max(0, min(int(cx_center - crop_w / 2), width - crop_w))
@@ -298,14 +299,11 @@ def render_split_screen_video(
             }
         )
 
-        detect_percent = (
-            min(100, int((current_time / duration) * 100)) if duration > 0 else 100
-        )
-        if detect_percent != last_detect_percent:
-            print(f"⏳ {label} - Face analysis: {detect_percent:3d}%", flush=True)
-            last_detect_percent = detect_percent
+        detect_bar.update(current_time)
 
         current_time += STEP_DETECTION
+
+    detect_bar.close(f"🧠 {label} - Face analysis complete.")
 
     # Build canonical center-X per speaker from 1:1 frames (median, robust to outliers)
     import statistics as _stats
@@ -716,9 +714,9 @@ def render_split_screen_video(
     try:
         cap.set(cv2.CAP_PROP_POS_MSEC, start_clip * 1000)
         frame_count = 0
-        last_render_percent = -1
 
         print(f"🎬 {label} - Split-screen render {'(dynamic) ' if is_dynamic else ''}started...", flush=True)
+        render_bar = ProgressBar(duration, f"{label} - Rendering")
         tracking_log = [] # Store (t, cx) for subtitle tracking
 
         while True:
@@ -1108,16 +1106,9 @@ def render_split_screen_video(
 
             frame_count += 1
 
-            render_percent = (
-                min(100, int((t / duration) * 100)) if duration > 0 else 100
-            )
-            if render_percent != last_render_percent:
-                print(
-                    f"⏳ {label} - Render split-screen: {render_percent:3d}% | "
-                    f"{format_seconds(t)} / {format_seconds(duration)}",
-                    flush=True,
-                )
-                last_render_percent = render_percent
+            render_bar.update(t)
+
+        render_bar.close()
 
         if writer_main:
             writer_main.stdin.close()

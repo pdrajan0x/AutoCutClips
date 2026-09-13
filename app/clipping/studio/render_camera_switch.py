@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import mediapipe as mp
 
+from ..progress import ProgressBar
 from .broll import crop_center_broll
 from .face_detection import get_face_detector
 from .utils import format_seconds, _resize_frame, _get_render_dims
@@ -132,7 +133,7 @@ def render_camera_switch_video(
     solo_counts: dict[str, int] = {spk: 0 for spk in speakers}
     multi_counts: dict[str, int] = {spk: 0 for spk in speakers}
     current_time = 0.0
-    last_detect_percent = -1
+    detect_bar = ProgressBar(duration, f"{label} - Face analysis")
 
     def _clamp_x_cs(cx_center: float) -> int:
         return max(0, min(int(cx_center - crop_w / 2), width - crop_w))
@@ -203,14 +204,11 @@ def render_camera_switch_video(
             }
         )
 
-        detect_pct = (
-            min(100, int(current_time / duration * 100)) if duration > 0 else 100
-        )
-        if detect_pct != last_detect_percent:
-            print(f"⏳ {label} - Face analysis: {detect_pct:3d}%", flush=True)
-            last_detect_percent = detect_pct
+        detect_bar.update(current_time)
 
         current_time += STEP_DETECTION
+
+    detect_bar.close(f"🧠 {label} - Face analysis complete.")
 
     # Build canonical center-X per speaker from 1:1 frames
     import statistics as _stats
@@ -493,10 +491,10 @@ def render_camera_switch_video(
     try:
         cap.set(cv2.CAP_PROP_POS_MSEC, start_clip * 1000)
         frame_count = 0
-        last_render_percent = -1
         tracking_log = [] # Store (t, cx) for each frame
 
         print(f"🎬 {label} - Camera-switch render started...", flush=True)
+        render_bar = ProgressBar(duration, f"{label} - Rendering")
 
         while True:
             ret, frame = cap.read()
@@ -693,15 +691,9 @@ def render_camera_switch_video(
             writer.stdin.write(out_frame.tobytes())
             frame_count += 1
 
-            render_pct = min(100, int(t / duration * 100)) if duration > 0 else 100
-            if render_pct != last_render_percent:
-                print(
-                    f"⏳ {label} - Render camera switch: {render_pct:3d}% | "
-                    f"{format_seconds(t)} / {format_seconds(duration)}",
-                    flush=True,
-                )
-                last_render_percent = render_pct
+            render_bar.update(t)
 
+        render_bar.close()
         writer.stdin.close()
         stderr_data = writer.stderr.read().decode("utf-8", errors="ignore")
         return_code = writer.wait()

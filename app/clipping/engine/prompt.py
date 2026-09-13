@@ -79,8 +79,8 @@ TARGET_ACCOUNTS = DEFAULT_TARGET_ACCOUNTS
 # CLIP DURATION BOUNDS (seconds) — change these to shift the allowed clip length
 # ==============================================================================
 
-MIN_CLIP_DURATION = 20
-MAX_CLIP_DURATION = 179
+MIN_CLIP_DURATION = 30
+MAX_CLIP_DURATION = 80
 
 
 def _account_routing_section(accounts: dict) -> str:

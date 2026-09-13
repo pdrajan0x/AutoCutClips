@@ -4,6 +4,8 @@ FFmpeg and encoder utilities for Studio rendering pipeline.
 
 import subprocess
 
+from ..progress import ProgressBar
+
 
 def format_seconds(seconds):
     """
@@ -314,7 +316,7 @@ def run_ffmpeg_with_progress(ffmpeg_cmd, total_duration, label="Render"):
         bufsize=1,
     )
 
-    last_percent = -1
+    progress = ProgressBar(total_duration, label)
     error_lines = []
 
     for raw_line in process.stderr:
@@ -330,24 +332,11 @@ def run_ffmpeg_with_progress(ffmpeg_cmd, total_duration, label="Render"):
 
         if line.startswith("out_time_ms="):
             try:
-                out_time_ms = int(line.split("=", 1)[1])
-                current_time = out_time_ms / 1_000_000
-                percent = (
-                    min(100, int((current_time / total_duration) * 100))
-                    if total_duration > 0
-                    else 0
-                )
-
-                if percent != last_percent:
-                    print(
-                        f"⏳ {label}: {percent:3d}% | "
-                        f"{format_seconds(current_time)} / {format_seconds(total_duration)}",
-                        flush=True,
-                    )
-                    last_percent = percent
-            except Exception:
+                progress.update(int(line.split("=", 1)[1]) / 1_000_000)
+            except ValueError:
                 pass
 
+    progress.close()
     return_code = process.wait()
     return return_code, error_lines[-20:]
 

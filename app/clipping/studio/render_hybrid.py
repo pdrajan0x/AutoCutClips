@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import mediapipe as mp
 
+from ..progress import ProgressBar
 from .broll import crop_center_broll
 from .face_detection import get_face_detector
 from .utils import RATIO_MAP, format_seconds, _resize_frame, _is_vertical_ratio, _get_render_dims
@@ -123,14 +124,15 @@ def render_hybrid_video(
     # PHASE 1: FACE DETECTION
     raw_data = []
     current_time = 0.0
-    last_detect_percent = -1
-    
+
     skip_tracking = getattr(cfg, "static_crop", False) and ratio in ["1:1", "3:4", "4:5"]
 
     if skip_tracking:
         print(f"🧠 {label} - Static crop enabled (no face tracking)...", flush=True)
+        detect_bar = None
     else:
         print(f"🧠 {label} - Face analysis started...", flush=True)
+        detect_bar = ProgressBar(duration, f"{label} - Face analysis")
 
     while current_time <= duration and not skip_tracking:
         cap.set(cv2.CAP_PROP_POS_MSEC, (start_clip + current_time) * 1000)
@@ -182,14 +184,12 @@ def render_hybrid_video(
             }
         )
 
-        detect_percent = (
-            min(100, int((current_time / duration) * 100)) if duration > 0 else 100
-        )
-        if detect_percent != last_detect_percent:
-            print(f"⏳ {label} - Face analysis: {detect_percent:3d}%", flush=True)
-            last_detect_percent = detect_percent
+        detect_bar.update(current_time)
 
         current_time += STEP_DETECTION
+
+    if detect_bar is not None:
+        detect_bar.close(f"🧠 {label} - Face analysis complete.")
 
     # PHASE 2: SMOOTH CAMERA
     smooth_data = []
@@ -299,9 +299,9 @@ def render_hybrid_video(
     try:
         cap.set(cv2.CAP_PROP_POS_MSEC, start_clip * 1000)
         frame_count = 0
-        last_render_percent = -1
 
         print(f"🎬 {label} - Frame render started...", flush=True)
+        render_bar = ProgressBar(duration, f"{label} - Rendering")
 
         while True:
             ret, main_frame = cap.read()
@@ -460,17 +460,9 @@ def render_hybrid_video(
                 writer.stdin.write(selected_frame.tobytes())
             frame_count += 1
 
-            render_percent = (
-                min(100, int((t / duration) * 100)) if duration > 0 else 100
-            )
-            if render_percent != last_render_percent:
-                print(
-                    f"⏳ {label} - Render frame: {render_percent:3d}% | "
-                    f"{format_seconds(t)} / {format_seconds(duration)}",
-                    flush=True,
-                )
-                last_render_percent = render_percent
+            render_bar.update(t)
 
+        render_bar.close()
         writer.stdin.close()
         stderr_data = writer.stderr.read().decode("utf-8", errors="ignore")
         return_code = writer.wait()

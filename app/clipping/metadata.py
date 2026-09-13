@@ -162,14 +162,25 @@ def normalize_and_validate(clips_json: list[dict]) -> list[dict]:
 
         warnings: list[str] = []
 
-        # --- timing validation ------------------------------------------------
+        # --- duration is a hard limit, not a suggestion -------------------------
+        # The prompt asks for MIN..MAX, but the model drifts, so enforce it here:
+        # over-long clips are trimmed, too-short ones cannot be salvaged.
         duration = item["end_time"] - item["start_time"]
-        if duration <= 0:
-            warnings.append("zero or negative duration")
-        elif duration < MIN_CLIP_DURATION:
-            warnings.append(f"shorter than {MIN_CLIP_DURATION}s ({duration:.1f}s)")
-        elif duration > MAX_CLIP_DURATION:
-            warnings.append(f"longer than {MAX_CLIP_DURATION}s ({duration:.1f}s)")
+
+        if duration > MAX_CLIP_DURATION:
+            item["end_time"] = item["start_time"] + MAX_CLIP_DURATION
+            warnings.append(
+                f"trimmed from {duration:.1f}s to the {MAX_CLIP_DURATION}s limit"
+            )
+            duration = MAX_CLIP_DURATION
+
+        if duration < MIN_CLIP_DURATION:
+            print(
+                f"   ⚠️ Dropped clip "
+                f"{_format_timestamp(item['start_time'])}-{_format_timestamp(item['end_time'])}"
+                f" — {duration:.1f}s is under the {MIN_CLIP_DURATION}s minimum."
+            )
+            continue
 
         # Keep the hook inside its own clip — the renderer trusts these directly.
         hook_start = item.get("hook_start_time")
@@ -190,6 +201,30 @@ def normalize_and_validate(clips_json: list[dict]) -> list[dict]:
         item["hook_text"] = _normalize_spaces(item.get("hook_text", ""))
         if not item["hook_text"]:
             warnings.append("hook_text is empty")
+
+        # Smart trim decides the *rendered* length, so it can undercut the
+        # minimum even when the span is fine. Clamp the segments to the clip and
+        # fall back to the full span rather than emit a too-short video.
+        segments = item.get("keep_segments")
+        if isinstance(segments, list) and segments:
+            clamped = []
+            for seg in segments:
+                try:
+                    seg_start = max(float(seg["start_time"]), item["start_time"])
+                    seg_end = min(float(seg["end_time"]), item["end_time"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if seg_end > seg_start:
+                    clamped.append({"start_time": seg_start, "end_time": seg_end})
+
+            kept = sum(s["end_time"] - s["start_time"] for s in clamped)
+            if not clamped or kept < MIN_CLIP_DURATION:
+                item.pop("keep_segments", None)
+                warnings.append(
+                    f"smart trim would leave {kept:.1f}s; rendering the full clip instead"
+                )
+            else:
+                item["keep_segments"] = clamped
 
         # --- metadata normalisation --------------------------------------------
         item["title"] = _trim_title(item.get("title", ""))
