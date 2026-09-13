@@ -1,10 +1,10 @@
 <br />
 <div align="center">
-  <a href="https://github.com/NaufalRizqullah/opensource-clipping">
-    <img src="assets/images/opensource-clipping-logo-editable.svg" alt="Logo" width="350">
+  <a href="https://github.com/pdrajan0x/AutoCutClips">
+    <img src="assets/images/AutoCutClips-logo-editable.svg" alt="Logo" width="350">
   </a>
 
-  <h3 align="center">OpenSource Clipping</h3>
+  <h3 align="center">AutoCutClips</h3>
 
   <p align="center">
     <strong>Ultimate AI Auto-Clipper & Teaser Generator</strong><br>
@@ -13,9 +13,9 @@
     <br />
     <a href="README.md">🇬🇧 Read in English</a>
     &middot;
-    <a href="https://github.com/NaufalRizqullah/opensource-clipping/issues/new">Laporkan Bug</a>
+    <a href="https://github.com/pdrajan0x/AutoCutClips/issues/new">Laporkan Bug</a>
     &middot;
-    <a href="https://github.com/NaufalRizqullah/opensource-clipping/issues/new">Minta Fitur Baru</a>
+    <a href="https://github.com/pdrajan0x/AutoCutClips/issues/new">Minta Fitur Baru</a>
   </p>
 </div>
 
@@ -39,14 +39,14 @@
 | **Watermark Engine** | Watermark teks & gambar kustom dengan posisi yang dapat diatur (9 posisi), padding, opacity, dan ukuran dinamis |
 | **Metadata Lintas Platform** | Judul/deskripsi/tag YouTube + caption TikTok — semua dalam Bahasa Inggris |
 | **Auto YouTube Uploader** | Upload klip highlight beserta metadata ke YouTube secara otomatis dengan penjadwalan (opsional) |
-| **Auto Facebook Reels Uploader** | Upload Reels ke Facebook Pages via Meta Graph API dengan penjadwalan otomatis — klip pertama langsung publish, klip berikutnya dijadwalkan otomatis dengan interval yang bisa dikonfigurasi (opsional) |
-| **Podcast Split-Screen** | Diarization speaker otomatis via **Pyannote** dengan layout split-screen atas-bawah untuk podcast (9:16). Mendukung **3+ speaker lintas scene** dengan frozen frame fallback per-speaker |
-| **Podcast Camera Switch** | Deteksi speaker aktif otomatis dengan switching yang scene-aware — crop full 9:16 fokus ke pembicara aktif; blurred pillarbox hanya saat speaker di scene yang sama bicara bersamaan (9:16) |
+| **Auto Instagram Reels Uploader** | Publish Reels ke akun Instagram Business/Creator via Instagram Graph API, dengan interval publish yang diatur secara lokal (Graph API sendiri tidak punya native scheduling) (opsional) |
+| **Podcast Split-Screen** | Diarization speaker otomatis via **Pyannote** dengan layout split-screen atas-bawah untuk podcast. Bekerja di semua rasio vertikal/kotak (`9:16`, `1:1`, `3:4`, `4:5`). Mendukung **3+ speaker lintas scene** dengan frozen frame fallback per-speaker |
+| **Podcast Camera Switch** | Deteksi speaker aktif otomatis dengan switching yang scene-aware — crop full-frame fokus ke pembicara aktif; blurred pillarbox hanya saat speaker di scene yang sama bicara bersamaan. Bekerja di semua rasio vertikal/kotak (`9:16`, `1:1`, `3:4`, `4:5`) |
 | **AI Voice-Over** | Mengubah auto-clip menjadi video reaksi/komentar original menggunakan **Gemini** (pembuat script) dan **edge-tts** (text-to-speech gratis), lengkap dengan audio ducking, penimpaan teks subtitle, dan ambient edge glow |
 
 > 🎬 **BARU: Mode Story Clip (`--story-mode`)**  
 > Perlu merakit cerita dari potongan adegan spesifik di berbagai sumber video (misalnya untuk *campaign* brand)? Gunakan fitur Story Clip multi-sumber!  
-> 👉 **[Baca dokumentasi lengkap Story Clip di sini](docs/STORY_CLIP.md)**
+> 👉 **[Baca dokumentasi lengkap Story Clip di sini](docs/STORY_CLIP_ID.md)**
 
 ## 📋 Prasyarat
 
@@ -55,7 +55,8 @@
 - **GPU CUDA** disarankan (untuk Whisper; bisa fallback ke CPU)
 - **Google Gemini API Key** ([dapatkan di sini](https://aistudio.google.com/apikey))
 - **Pexels API Key** (opsional, untuk B-roll — [dapatkan di sini](https://www.pexels.com/api/))
-- **HuggingFace Token** (opsional, untuk split-screen / camera-switch — [dapatkan di sini](https://huggingface.co/settings/tokens), perlu accept [Pyannote model agreement](https://huggingface.co/pyannote/speaker-diarization-3.1))
+- **HuggingFace Token** (opsional, untuk trigger `diarization` pada split-screen / camera-switch — [dapatkan di sini](https://huggingface.co/settings/tokens), perlu accept [Pyannote model agreement](https://huggingface.co/pyannote/speaker-diarization-3.1))
+- **NVIDIA API Key** (opsional, hanya jika memakai `--ai-provider nvidia` — [dapatkan di sini](https://build.nvidia.com/))
 
 ## ☁️ Menjalankan di Google Colab (Direkomendasikan)
 
@@ -65,7 +66,7 @@ Buka notebook Google Colab baru, pastikan Runtime memakai **T4 GPU**, lalu jalan
 **Cell 1: Setup & Clone**
 ```python
 !rm -rf ./* ./.*
-!git clone https://github.com/your-username/opensource-clipping.git .
+!git clone https://github.com/pdrajan0x/AutoCutClips.git .
 !pip install -r requirements.txt
 ```
 
@@ -92,7 +93,7 @@ GEMINI_MODEL = "gemini-3-flash-preview"
 # Gunakan 'float32' untuk limitasi hardware Kaggle, atau 'float16' untuk standar Colab T4
 WHISPER_COMPUTE_TYPE = "float32"
 
-!python main.py \
+!python -m app.cli \
   --url "{URL_YOUTUBE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
@@ -104,7 +105,7 @@ WHISPER_COMPUTE_TYPE = "float32"
   --no-bgm
 ```
 
-*(Catatan: Kami juga telah menyertakan file `notebooks/Lib_OpenSource_Clipping.ipynb` di repositori ini sebagai template praktis).*
+*(Catatan: Kami juga telah menyertakan file `notebooks/Lib_AutoCutClips.ipynb` di repositori ini sebagai template praktis).*
 
 ---
 
@@ -112,7 +113,7 @@ WHISPER_COMPUTE_TYPE = "float32"
 
 **Clipping Studio** adalah dashboard berbasis browser yang di-hosting gratis di **GitHub Pages** dan terhubung ke notebook Kaggle/Colab sebagai backend — memberikan GUI lengkap untuk mengontrol pipeline AI clipping tanpa setup lokal.
 
-**🔗 Buka Studio:** [naufalrizqullah.github.io/opensource-clipping/studio/](https://naufalrizqullah.github.io/opensource-clipping/studio/)
+**🔗 Buka Studio:** [pdrajan0x.github.io/AutoCutClips/studio/](https://pdrajan0x.github.io/AutoCutClips/studio/)
 
 ### Cara Kerja
 
@@ -121,7 +122,7 @@ WHISPER_COMPUTE_TYPE = "float32"
 │   GitHub Pages      │ ◄──────────────────►   │   Kaggle / Colab         │
 │   (Frontend Statis) │                        │   (FastAPI + GPU)        │
 │                     │   POST /api/jobs       │                          │
-│   studio/index.html │ ────────────────────►  │   web/api/app.py         │
+│   studio/index.html │ ────────────────────►  │   app/web/api/app.py         │
 │   studio/new-job    │   GET  /api/jobs/:id   │   pipeline clipping      │
 │   studio/settings   │ ◄────────────────────  │   Whisper + Gemini       │
 └─────────────────────┘                        └──────────────────────────┘
@@ -130,9 +131,9 @@ WHISPER_COMPUTE_TYPE = "float32"
 
 ### Cara Pakai
 
-1. **Jalankan backend** — Buka `notebooks/Kaggle_Studio_Server.ipynb` di Kaggle (atau Colab), tambahkan API key ke Secrets, lalu run semua cell. Salin **Public URL** dari output.
+1. **Jalankan backend** — Buka `notebooks/kaggle-studio-server.ipynb` di Kaggle (atau Colab), tambahkan API key ke Secrets, lalu run semua cell. Salin **Public URL** dari output.
 
-2. **Buka Studio** — Kunjungi [halaman Studio](https://naufalrizqullah.github.io/opensource-clipping/studio/) di browser.
+2. **Buka Studio** — Kunjungi [halaman Studio](https://pdrajan0x.github.io/AutoCutClips/studio/) di browser.
 
 3. **Connect** — Klik tombol **Connect** di sidebar, paste URL tunnel, lalu klik **Test & Connect**.
 
@@ -146,8 +147,8 @@ WHISPER_COMPUTE_TYPE = "float32"
 
 ```bash
 # 1. Clone repo
-git clone https://github.com/your-username/opensource-clipping.git
-cd opensource-clipping
+git clone https://github.com/pdrajan0x/AutoCutClips.git
+cd AutoCutClips
 
 # 2. Install dependensi (pilih salah satu)
 pip install -r requirements.txt          # pip / Colab
@@ -158,20 +159,20 @@ cp .env.sample .env
 # Edit file .env dan masukkan GOOGLE_API_KEY kamu
 
 # 4. Jalankan (Wajib sertakan --url)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID"
+python -m app.cli --url "https://youtube.com/watch?v=VIDEO_ID"
 # 5. Contoh Eksekusi
 
 # Mode Standar (Default untuk 5 klip)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" --clips 5 --ratio 16:9
+python -m app.cli --url "https://youtube.com/watch?v=VIDEO_ID" --clips 5 --ratio 16:9
 
 # Prioritaskan kualitas source tertinggi yang tersedia (default)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" --source-height max
+python -m app.cli --url "https://youtube.com/watch?v=VIDEO_ID" --source-height max
 
 # Batasi kualitas source hingga 1440p (2K)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" --source-height 1440
+python -m app.cli --url "https://youtube.com/watch?v=VIDEO_ID" --source-height 1440
 
 # Tuning output lebih tajam (mode biasa maupun dynamic-split)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" \
+python -m app.cli --url "https://youtube.com/watch?v=VIDEO_ID" \
   --source-height 2160 \
   --video-cq 19 \
   --video-crf 17 \
@@ -179,20 +180,20 @@ python main.py --url "https://youtube.com/watch?v=VIDEO_ID" \
   --video-scale-algo lanczos
 
 # Mode Advanced (YOLOv8 GPU Face Tracking & Font Khusus)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" \
+python -m app.cli --url "https://youtube.com/watch?v=VIDEO_ID" \
   --clips 7 \
   --face-detector yolo \
   --yolo-size 8m \
   --font-style STORYTELLER
 
 # Mode Podcast Split-Screen (2 speaker, 9:16)
-python main.py --url "https://youtube.com/watch?v=PODCAST_ID" \
+python -m app.cli --url "https://youtube.com/watch?v=PODCAST_ID" \
   --clips 3 \
   --ratio "9:16" \
   --split-screen
 
 # Mode Podcast Camera Switch (auto-switch ke speaker aktif, blurred pillarbox saat overlap)
-python main.py --url "https://youtube.com/watch?v=PODCAST_ID" \
+python -m app.cli --url "https://youtube.com/watch?v=PODCAST_ID" \
   --clips 3 \
   --ratio "9:16" \
   --camera-switch \
@@ -200,50 +201,65 @@ python main.py --url "https://youtube.com/watch?v=PODCAST_ID" \
   --switch-blend-duration 0.0
 
 # Mode Multi-Speaker Podcast (3 speaker lintas 2 scene)
-python main.py --url "https://youtube.com/watch?v=PODCAST_ID" \
+python -m app.cli --url "https://youtube.com/watch?v=PODCAST_ID" \
   --clips 3 \
   --ratio "9:16" \
   --camera-switch \
   --diarization-speakers 3
 
 # Custom Hook Manual (menggunakan klip .mp4 eksternal)
-python main.py --url "URL_VIDEO" --hook-source "URL_DRIVE_ATAU_PATH" --hook-source-start 5.0 --hook-duration 4
+python -m app.cli --url "URL_VIDEO" --hook-source "URL_DRIVE_ATAU_PATH" --hook-source-start 5.0 --hook-duration 4
 
 # Rendering Ultra-HD 2K (Download 1440p dan render resolusi vertikal 1440p native dengan penajaman)
-python main.py --url "URL_VIDEO" --source-height 1440 --render-height source --video-sharpen
+python -m app.cli --url "URL_VIDEO" --source-height 1440 --render-height source --video-sharpen
 
 # Menggunakan NVIDIA NIM (DeepSeek-V3) sebagai pengganti Gemini
-python main.py --url "URL_VIDEO" --ai-provider nvidia --nvidia-model "deepseek-ai/deepseek-v3"
+python -m app.cli --url "URL_VIDEO" --ai-provider nvidia --nvidia-model "deepseek-ai/deepseek-v3"
 
 # Output kotak untuk Instagram Feed (1:1)
-python main.py --url "URL_VIDEO" --ratio "1:1" --clips 5
+python -m app.cli --url "URL_VIDEO" --ratio "1:1" --clips 5
 
 # Output portrait Instagram/Facebook (4:5)
-python main.py --url "URL_VIDEO" --ratio "4:5" --clips 5
+python -m app.cli --url "URL_VIDEO" --ratio "4:5" --clips 5
 
 # Output portrait klasik (3:4)
-python main.py --url "URL_VIDEO" --ratio "3:4" --clips 5
+python -m app.cli --url "URL_VIDEO" --ratio "3:4" --clips 5
 
 # TikTok source
-python main.py --url "https://www.tiktok.com/@username/video/1234567890" --source tiktok --clips 3
+python -m app.cli --url "https://www.tiktok.com/@username/video/1234567890" --source tiktok --clips 3
 
 # Instagram source
-python main.py --url "https://www.instagram.com/reel/123456789/" --source instagram --clips 3
+python -m app.cli --url "https://www.instagram.com/reel/123456789/" --source instagram --clips 3
 
 # Google Drive source
-python main.py --url "https://drive.google.com/file/d/1234567890/view" --source gdrive --clips 3
+python -m app.cli --url "https://drive.google.com/file/d/1234567890/view" --source gdrive --clips 3
 ```
+
+## 🧭 Subcommand
+
+`python -m app.cli <subcommand> ...` (juga tersedia sebagai console script mandiri, misal `clipping`). Jika argumen pertama bukan subcommand yang dikenal, semua argumen diteruskan ke pipeline clip/story:
+
+| Subcommand | Console script | Fungsi |
+|---|---|---|
+| `clip` (default) | `clipping` | Pipeline auto-clip |
+| `story` | — | Pipeline yang sama, dengan `--story-mode` otomatis aktif |
+| `upload-youtube` | `clipping-upload-youtube` | Upload/jadwalkan klip ke YouTube |
+| `upload-instagram` | `clipping-upload-instagram` | Publish klip sebagai Instagram Reels |
+| `reschedule-youtube` | `clipping-reschedule-youtube` | Re-space video YouTube yang sudah terjadwal |
+| `youtube-token` | `clipping-youtube-token` | Generate/verifikasi token OAuth YouTube |
+| — | `clipping-tracker` | Jalankan aplikasi web YouTube Tracker |
 
 ## ⚙️ Opsi CLI
 
 ```
-python main.py --help
+python -m app.cli --help
 ```
 
 | Argumen | Default | Deskripsi |
 |---|---|---|
-| `--url`, `-u` | — | URL video yang akan diproses (Wajib) |
+| `--url`, `-u` | — | URL video yang akan diproses (Wajib kecuali `--story-mode`) |
 | `--source` | `youtube` | Sumber video. Pilihan: `youtube`, `tiktok`, `instagram`, `gdrive`. |
+| `--tiktok` | — | **[Deprecated]** Gunakan `--source tiktok` |
 | `--clips`, `-n` | `7` | Jumlah klip highlight yang dihasilkan |
 | `--ratio`, `-r` | `9:16` | Rasio aspek output (`9:16`, `16:9`, `1:1`, `3:4`, `4:5`) |
 | `--source-height` | `max` | Batas tinggi resolusi source saat download (`max`, `1080`, `1440`, `2160`, dst.) |
@@ -294,9 +310,9 @@ python main.py --help
 | `--gemini-model` | `gemini-3-flash-preview` | Nama model Gemini |
 | `--gemini-fallback-model` | `gemini-2.5-flash` | Nama model fallback Gemini jika model utama gagal |
 | `--load-gemini-json` | `False` | Memuat file `gemini_response.json` dari folder output untuk melewati pemanggilan API Gemini AI (berguna untuk reproduksi/debug) |
-| `--split-screen` | `False` | Aktifkan mode split-screen untuk podcast (hanya 9:16, butuh `HF_TOKEN`). Mendukung 3+ speaker lintas scene |
+| `--split-screen` | `False` | Aktifkan mode split-screen untuk podcast (semua rasio vertikal/kotak — `9:16`, `1:1`, `3:4`, `4:5`; trigger `diarization` butuh `HF_TOKEN`). Mendukung 3+ speaker lintas scene |
 | `--diarization-speakers` | `auto` | Jumlah speaker untuk diarization (set ke `3` untuk fix 3 orang, atau `auto` untuk deteksi visual AI otomatis) |
-| `--camera-switch` | `False` | Potong ke speaker yang sedang aktif secara dinamis (Hanya 9:16). Butuh Token HF |
+| `--camera-switch` | `False` | Potong ke speaker yang sedang aktif secara dinamis (semua rasio vertikal/kotak — `9:16`, `1:1`, `3:4`, `4:5`). Butuh Token HF |
 | `--switch-hold-duration` | `2.0` | Durasi minimum (detik) sebelum berpindah speaker (hanya untuk camera-switch) |
 | `--switch-blend-duration` | `0.0` | Durasi transisi saat berganti speaker (0 = instant snap, 0.2 = smooth blend) |
 | `--split-zoom` | `1.0` | Faktor zoom manual untuk panel split-screen (misal 1.2, 1.5) |
@@ -315,7 +331,7 @@ python main.py --help
 
 ## 📐 Rasio Aspek
 
-OpenSource Clipping mendukung **5 rasio aspek output**. Semua rasio vertikal/kotak menyertakan **face-tracking** secara default untuk menjaga subjek tetap di tengah frame.
+AutoCutClips mendukung **5 rasio aspek output**. Semua rasio vertikal/kotak menyertakan **face-tracking** secara default untuk menjaga subjek tetap di tengah frame.
 
 | Rasio | Resolusi Output | Face Tracking | Cocok Untuk |
 |---|---|---|---|
@@ -371,34 +387,34 @@ Meniru gaya editing profesional dengan fokus penuh pada satu pembicara yang akti
 
 ```bash
 # 1. Clipping AI Standar (7 klip, 9:16)
-python main.py --url "URL_VIDEO"
+python -m app.cli --url "URL_VIDEO"
 
 # 2. Dynamic Split-Screen (Berbasis Visual, TANPA TOKEN)
-python main.py --url "URL_VIDEO" --split-screen --dynamic-split --split-trigger face
+python -m app.cli --url "URL_VIDEO" --split-screen --dynamic-split --split-trigger face
 
 # 3. Dynamic Split-Screen (Berbasis Audio, Sorot yang bicara, butuh HF_TOKEN)
-python main.py --url "URL_VIDEO" --split-screen --dynamic-split --split-trigger diarization
+python -m app.cli --url "URL_VIDEO" --split-screen --dynamic-split --split-trigger diarization
 
 # 4. Camera Switch Sinematik (Butuh HF_TOKEN)
-python main.py --url "URL_VIDEO" --camera-switch
+python -m app.cli --url "URL_VIDEO" --camera-switch
 
 # 5. Smart Separation Split-Screen (Auto-Zoom & Vertical Tracking)
-python main.py --url "URL_VIDEO" --split-screen --dynamic-split --split-trigger face --split-auto-zoom --split-v-align 0.4
+python -m app.cli --url "URL_VIDEO" --split-screen --dynamic-split --split-trigger face --split-auto-zoom --split-v-align 0.4
 
 # 6. Output kotak (1:1) dengan Split-Screen
-python main.py --url "URL_VIDEO" --ratio "1:1" --split-screen --dynamic-split --split-trigger face
+python -m app.cli --url "URL_VIDEO" --ratio "1:1" --split-screen --dynamic-split --split-trigger face
 
 # 7. Hook V2 + Segment Trimming (default)
-python main.py --url "URL_VIDEO" --hook-v2
+python -m app.cli --url "URL_VIDEO" --hook-v2
 
 # 8. Hook V2 + Silence Trimming Agresif
-python main.py --url "URL_VIDEO" --hook-v2 --silence-trim
+python -m app.cli --url "URL_VIDEO" --hook-v2 --silence-trim
 
 # 9. Hook V2 tanpa Segment Trimming (render penuh)
-python main.py --url "URL_VIDEO" --hook-v2 --no-segment-trim
+python -m app.cli --url "URL_VIDEO" --hook-v2 --no-segment-trim
 
 # 10. Hook V2 Custom: 4 micro-hooks dengan gaya glitch
-python main.py --url "URL_VIDEO" --hook-v2 --hook-v2-items 4 --hook-v2-style "glitch_fast"
+python -m app.cli --url "URL_VIDEO" --hook-v2 --hook-v2-items 4 --hook-v2-style "glitch_fast"
 ```
 
 > [!IMPORTANT]
@@ -418,10 +434,10 @@ Ketika Anda menggunakan argumen `--voiceover`, sistem akan:
 **Contoh Penggunaan:**
 ```bash
 # Voice-over bahasa Inggris (Menggunakan default en-US-AvaNeural dan bahasa Inggris)
-python main.py --url "URL_VIDEO" --voiceover
+python -m app.cli --url "URL_VIDEO" --voiceover
 
 # Voice-over bahasa Indonesia dengan gaya reaksi
-python main.py --url "URL_VIDEO" --voiceover --voiceover-lang id --voiceover-voice id-ID-ArdiNeural --voiceover-style reaction
+python -m app.cli --url "URL_VIDEO" --voiceover --voiceover-lang id --voiceover-voice id-ID-ArdiNeural --voiceover-style reaction
 ```
 
 **Opsi Konfigurasi:**
@@ -492,27 +508,27 @@ Contoh:
 ## 📂 Struktur Proyek
 
 ```text
-opensource-clipping/
-├── main.py                  # Entry point CLI
-├── run_upload.py            # CLI auto-uploader YouTube
-├── run_fb_upload.py         # CLI auto-uploader Facebook Pages Reels
-├── pyproject.toml           # Dependensi & metadata proyek
+AutoCutClips/
+├── pyproject.toml           # Dependensi, metadata & console scripts
 ├── .env.sample              # Template API key
 ├── .gitignore
 ├── README.md                # Dokumentasi (English)
 ├── README_ID.md             # Dokumentasi (Indonesia)
-├── clipping/
-│   ├── config.py            # Konfigurasi master & argparse
-│   ├── engine.py            # Download → Transkripsi → Gemini AI
-│   ├── diarization.py       # Pyannote speaker diarization
-│   ├── metadata.py          # Normalisasi & QA metadata
-│   ├── runner.py            # Orkestrator pipeline
-│   ├── story/               # Modul mode Story Clip
-│   └── studio/              # Modul mesin render video
-├── facebook_uploader/       # Upload & penjadwalan Reels Facebook Pages
-├── web/                     # Web API dan React Dashboard
-├── youtube_tracker/         # Aplikasi Web YouTube Tracker
-└── youtube_uploader/        # Logika upload & penjadwalan YouTube
+├── sources.json             # Story Clip Mode: daftar sumber video
+├── story_recipe.json        # Story Clip Mode: resep penyusunan klip
+├── upload_safety.json       # Rambu keamanan uploader YouTube
+└── app/
+    ├── cli.py                # Entry point CLI (python -m app.cli)
+    ├── clipping/
+    │   ├── config.py         # Konfigurasi master & argparse
+    │   ├── runner.py         # Orkestrator pipeline
+    │   ├── story_runner.py   # Orkestrator Story Clip Mode
+    │   ├── story/            # Modul bantu mode Story Clip
+    │   ├── engine/           # Download → Transkripsi → Gemini/NVIDIA AI
+    │   └── studio/           # Modul mesin render video
+    ├── uploaders/            # Logika upload & penjadwalan YouTube + Instagram
+    ├── tracker/              # Aplikasi web YouTube Tracker
+    └── web/                  # Web API dan React Dashboard
 ```
 
 ## 📊 Hasil (Results)
@@ -652,7 +668,7 @@ RASIO = "9:16"
 FONT_STYLE = "DEFAULT"
 GEMINI_MODEL = "gemini-2.0-flash"
 
-!python main.py \
+!python -m app.cli \
   --url "{URL_YOUTUBE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
@@ -677,7 +693,7 @@ RASIO = "9:16"
 FONT_STYLE = "DEFAULT"
 GEMINI_MODEL = "gemini-2.0-flash"
 
-!python main.py \
+!python -m app.cli \
   --url "{URL_YOUTUBE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
@@ -697,56 +713,64 @@ GEMINI_MODEL = "gemini-2.0-flash"
 
 ## 📺 Upload Otomatis ke YouTube
 
-Proyek ini sekarang menyertakan uploader YouTube mandiri (standalone) dengan dukungan penjadwalan (scheduling) otomatis!
+Proyek ini menyertakan uploader YouTube mandiri (standalone) dengan dukungan penjadwalan (scheduling) otomatis!
 
-1. Tempatkan file `youtube_token.json` Anda yang telah dikonfigurasi ke dalam folder `.credentials/` (buat foldernya secara manual jika belum ada).
-2. Setelah proses render secara keseluruhan selesai, script secara otomatis akan membaca metadata dan file video dari dalam folder `outputs/` (contoh: `outputs/render_manifest.json`). Anda cukup jalankan script uploader:
+1. Generate token OAuth Anda: `python -m app.uploaders.youtube_token generate` (lihat [YouTube API Setup Guide](wiki/15-YouTube-API-Setup-Guide.md) untuk panduan lengkap). Perintah ini langsung menulis `.credentials/youtube_token.json`.
+2. Setelah proses render secara keseluruhan selesai, uploader secara otomatis akan membaca metadata dan file video dari dalam folder `outputs/` (contoh: `outputs/render_manifest.json`). Anda cukup jalankan:
    ```bash
-   # Mode biasa (default interval 8 jam & scheduling otomatis)
-   python run_upload.py
+   # Mode biasa (interval default 24 jam, diatur oleh upload_safety.json)
+   python -m app.cli upload-youtube
 
    # Atau jalankan dengan argumen kustom (contoh):
-   python run_upload.py --interval-hours 12 --tz-name "Asia/Jakarta"
+   python -m app.cli upload-youtube --interval-hours 12 --tz-name "Asia/Jakarta"
    ```
-3. Untuk mengetes hanya dengan video pertama, jalankan dengan argumen `--test-mode`. Gunakan perintah `python run_upload.py --help` untuk melihat opsi timezone dan interval penjadwalan.
+3. Untuk mengetes hanya dengan video pertama, jalankan dengan argumen `--test-mode`. Gunakan perintah `python -m app.cli upload-youtube --help` untuk melihat semua opsi timezone, safety-config, dan penjadwalan.
+4. Untuk mengatur ulang jadwal video yang masih scheduled/private, gunakan `python -m app.cli reschedule-youtube [--apply]` (dry-run secara default).
 
-## 📘 Upload Otomatis ke Facebook Pages (Reels)
+## 📘 Upload Otomatis ke Instagram (Reels)
 
-Proyek ini juga menyertakan uploader Reels Facebook Pages mandiri dengan dukungan penjadwalan native via Meta Graph API!
+Proyek ini juga menyertakan publisher Reels Instagram mandiri yang dibangun di atas **Instagram Graph API**. Fitur ini menggantikan uploader Facebook Page Reels lama proyek ini — tidak ada lagi uploader Facebook Page.
 
 **Prasyarat:**
-- Page Access Token (long-lived) Facebook dengan izin `pages_manage_posts` dan `pages_read_engagement`.
-- Set `META_PAGE_ID`, `META_PAGE_ACCESS_TOKEN`, dan `META_GRAPH_VERSION` di file `.env` Anda.
+- Akun Instagram Business/Creator yang terhubung ke Facebook Page.
+- Access token long-lived dengan izin `instagram_content_publish`.
+- Set `IG_USER_ID` (User ID Instagram, bukan Page ID Facebook) dan `IG_ACCESS_TOKEN` di file `.env` Anda. `IG_GRAPH_VERSION` (default `v25.0`) dan `IG_PUBLIC_BASE_URL` bersifat opsional. Variabel lama `META_PAGE_ACCESS_TOKEN` / `META_GRAPH_VERSION` tetap berfungsi sebagai fallback.
 
 **Cara Kerja:**
-1. Memvalidasi Page Access Token terhadap Graph API.
-2. Membaca jadwal post yang sudah ada untuk menentukan slot waktu berikutnya.
-3. Upload setiap klip sebagai Reel: buat sesi → upload binary → poll status processing → publish/jadwalkan.
-4. Klip pertama langsung di-publish jika belum ada antrian; klip berikutnya dijadwalkan dengan interval 5 jam (bisa dikonfigurasi).
-5. Jika ada langkah yang gagal, batch **langsung berhenti** (tidak fallback ke publish langsung).
+1. Memvalidasi access token terhadap Graph API.
+2. Membuat media container (`media_type=REELS`) — via `video_url` (jika `IG_PUBLIC_BASE_URL` diset) atau resumable binary upload.
+3. Poll container hingga statusnya `FINISHED`, lalu publish.
+4. Karena Graph API **tidak punya** parameter scheduled-publish native, `--interval-hours` diatur secara lokal: klip yang slotnya belum tiba ditandai `deferred` dan dipublish pada run berikutnya (misal via cron). Gunakan `--publish-now` untuk mengabaikan interval dan publish seluruh batch berurutan.
+5. Jika publish gagal, batch **langsung berhenti** (tidak fallback ke publish lain).
 
 ```bash
-# Mode biasa (baca .env untuk META_PAGE_ID & META_PAGE_ACCESS_TOKEN)
-python run_fb_upload.py
+# Mode biasa (baca .env untuk IG_USER_ID & IG_ACCESS_TOKEN)
+python -m app.cli upload-instagram
 
-# Mode test — hanya upload klip pertama
-python run_fb_upload.py --test-mode
+# Mode test — hanya publish klip pertama
+python -m app.cli upload-instagram --test-mode
 
-# Interval kustom (3 jam antar video)
-python run_fb_upload.py --interval-hours 3
+# Interval kustom (3 jam antar Reel)
+python -m app.cli upload-instagram --interval-hours 3
+
+# Abaikan interval, publish seluruh batch berurutan
+python -m app.cli upload-instagram --publish-now
 
 # Lihat semua opsi
-python run_fb_upload.py --help
+python -m app.cli upload-instagram --help
 ```
 
 | Argumen | Default | Deskripsi |
 |---|---|---|
 | `--manifest-file` | `outputs/render_manifest.json` | Input manifest dari pipeline clipping |
-| `--result-file` | `outputs/fb_upload_results.json` | Output file JSON trace upload |
-| `--updated-manifest` | `outputs/render_manifest_fb_uploaded.json` | Manifest terupdate dengan status upload |
-| `--tz-name` | `Asia/Makassar` | Timezone untuk penjadwalan (format IANA) |
-| `--interval-hours` | `5` | Jarak antar upload terjadwal (jam) |
-| `--test-mode` | `false` | Upload hanya video pertama |
+| `--result-file` | `outputs/ig_upload_results.json` | Output file JSON trace publish |
+| `--updated-manifest` | `outputs/render_manifest_ig_uploaded.json` | Manifest terupdate dengan status publish |
+| `--tz-name` | `$APP_TIMEZONE` atau `Asia/Makassar` | Timezone untuk perhitungan interval (format IANA) |
+| `--interval-hours` | `5` | Jarak minimum antar publish (jam) |
+| `--test-mode` | `false` | Publish hanya item pertama yang pending |
+| `--publish-now` | `false` | Abaikan interval, publish seluruh batch berurutan |
+
+Lihat [halaman wiki Instagram Reels Uploader](wiki/16-Instagram-Reels-Uploader.md) untuk detail alur publish dan rate limit lengkap.
 
 ## 🧹 Pembersihan Disk (Cleanup)
 
@@ -762,7 +786,7 @@ bash cleanup.sh
 
 Feel free for contributing, support, fork, likes, dll. Dukungan Anda sangat berarti untuk terus mengembangkan proyek open-source ini.
 
-Dukung proyek ini melalui Saweria: [https://saweria.co/NaufalRizqullah17](https://saweria.co/NaufalRizqullah17)
+Dukung proyek ini melalui Saweria: [https://saweria.co/pdrajan0x17](https://saweria.co/pdrajan0x17)
 
 ## 📄 Lisensi
 

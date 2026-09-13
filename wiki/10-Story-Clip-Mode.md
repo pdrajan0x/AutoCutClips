@@ -22,7 +22,7 @@ Unlike the standard auto-clipping mode (which uses AI to find highlights), Story
 ## How to Run
 
 ```bash
-python main.py --story-mode \
+python -m app.cli --story-mode \
   --story-recipe story_recipe.json \
   --sources-json sources.json
 ```
@@ -90,7 +90,7 @@ Register all raw video sources here. Each source needs an `id`, `name`, `url`, a
     {
       "id": "local_intro",
       "name": "Custom Intro Animation",
-      "url": "/path/to/intro.mp4",
+      "local_path": "/path/to/intro.mp4",
       "platform": "local"
     }
   ]
@@ -196,7 +196,7 @@ outputs/
 
 4. **Skip Downloads** — After your first run, use `--skip-download` to speed up iteration:
    ```bash
-   python main.py --story-mode --skip-download --story-recipe story_recipe.json
+   python -m app.cli --story-mode --skip-download --story-recipe story_recipe.json
    ```
 
 ---

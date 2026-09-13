@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-app.cli — Command-line entry points for OpenSource Clipping.
+app.cli — Command-line entry points for AutoCutClips.
 
 Clip / story mode (the default — flags are parsed by clipping.config):
     python -m app.cli --url "https://..."
@@ -51,7 +51,7 @@ def _on_off(flag: bool) -> str:
 
 def _print_story_summary(cfg) -> None:
     _banner(
-        f"🎬 OpenSource Clipping v{VERSION} — Story Clip Mode",
+        f"🎬 AutoCutClips v{VERSION} — Story Clip Mode",
         [
             ("Recipe", cfg.story_recipe_path),
             ("Sources", cfg.sources_json_path),
@@ -106,7 +106,7 @@ def _print_clip_summary(cfg) -> None:
                 ("WM Scale", f"{getattr(cfg, 'watermark_scale', 15)}% of frame height")
             )
 
-    _banner(f"🎬 OpenSource Clipping v{VERSION}", rows)
+    _banner(f"🎬 AutoCutClips v{VERSION}", rows)
 
 
 def clip(argv: list[str] | None = None) -> None:
@@ -143,7 +143,7 @@ def clip(argv: list[str] | None = None) -> None:
 def _youtube_upload_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="clipping-upload-youtube",
-        description="🚀 OpenSource Clipping — YouTube auto-uploader & scheduler",
+        description="🚀 AutoCutClips — YouTube auto-uploader & scheduler",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--token-file", default=".credentials/youtube_token.json",
@@ -220,7 +220,7 @@ def upload_youtube(argv: list[str] | None = None) -> None:
 def _instagram_upload_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="clipping-upload-instagram",
-        description="OpenSource Clipping — Instagram Reels auto-uploader",
+        description="AutoCutClips — Instagram Reels auto-uploader",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--manifest-file", default="outputs/render_manifest.json",
@@ -301,9 +301,17 @@ def youtube_token(argv: list[str] | None = None) -> None:
     _main(argv)
 
 
+def story(argv: list[str] | None = None) -> None:
+    """Run the clip pipeline in Story Clip mode (implies --story-mode)."""
+    argv = list(argv) if argv is not None else []
+    if "--story-mode" not in argv:
+        argv = ["--story-mode", *argv]
+    clip(argv)
+
+
 SUBCOMMANDS = {
     "clip": clip,
-    "story": clip,  # story mode is selected with --story-mode
+    "story": story,
     "upload-youtube": upload_youtube,
     "upload-instagram": upload_instagram,
     "reschedule-youtube": reschedule_youtube,

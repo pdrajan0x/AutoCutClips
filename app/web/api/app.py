@@ -1,7 +1,7 @@
 """
 app.web.api.app — FastAPI application entry point.
 
-OpenSource Clipping Studio — web GUI backend.
+AutoCutClips Studio — web GUI backend.
 
 Run with:
     uvicorn app.web.api.app:app --host 0.0.0.0 --port 8000 --reload
@@ -24,13 +24,13 @@ from .routes import files, jobs, settings
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup/shutdown lifecycle."""
-    print("🚀 OpenSource Clipping Studio — backend starting...")
+    print("🚀 AutoCutClips Studio — backend starting...")
     yield
     print("👋 Backend shutting down...")
 
 
 app = FastAPI(
-    title="OpenSource Clipping Studio",
+    title="AutoCutClips Studio",
     description="AI Auto-Clipper & Teaser Generator — Web GUI API",
     version=VERSION,
     lifespan=lifespan,
@@ -61,7 +61,7 @@ app.include_router(settings.router)
 @app.get("/")
 async def root():
     return {
-        "name": "OpenSource Clipping Studio",
+        "name": "AutoCutClips Studio",
         "version": VERSION,
         "docs": "/docs",
         "health": "/api/health",

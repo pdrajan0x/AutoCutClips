@@ -23,7 +23,7 @@ Download client_secret.json
         ↓
 Place in .credentials/client_secret.json
         ↓
-Run generate_youtube_token.py (on your local PC)
+Run `python -m app.uploaders.youtube_token generate` (on your local PC)
         ↓
 Login Google + Allow YouTube access in browser
         ↓
@@ -141,12 +141,13 @@ Before creating OAuth credentials, Google requires you to configure a consent sc
 4. Your project structure should now look like:
 
    ```text
-   opensource-clipping/
+   AutoCutClips/
    ├── .credentials/
    │   └── client_secret.json       ← Your OAuth Client JSON
-   ├── youtube_uploader/
-   │   ├── generate_youtube_token.py
-   │   └── uploader.py
+   ├── app/
+   │   └── uploaders/
+   │       ├── youtube_token.py
+   │       └── youtube.py
    └── ...
    ```
 
@@ -187,7 +188,9 @@ This is important because an expired token with `invalid_grant` status cannot be
 Run the token generator from the **project root directory**:
 
 ```bash
-python youtube_uploader/generate_youtube_token.py
+python -m app.uploaders.youtube_token generate
+# or, if installed as a console script:
+clipping-youtube-token generate
 ```
 
 > **Path note:** The script looks for `.credentials/client_secret.json` relative to the **current working directory**, so always run from the project root.
@@ -250,22 +253,24 @@ Open `youtube_token.json` and verify it contains these essential fields:
 
 ### Test the refresh token
 
-Run the test script included in the project:
+Use the `verify` subcommand built into the token tool:
 
 ```bash
-python youtube_uploader/test_youtube_refresh.py
+python -m app.uploaders.youtube_token verify
+# or:
+clipping-youtube-token verify
 ```
 
 **Expected output:**
 ```
-Token valid: True/False
-Token expired: True/False
-Ada refresh_token: True
-Mencoba refresh token...
-Refresh OK.
-Token valid setelah refresh: True
-Channel terdeteksi: Your Channel Name
-Channel ID: UCxxxxxxxx
+Token valid      : True/False
+Token expired    : True/False
+Has refresh_token: True
+Expiry           : 2026-01-01 12:00:00+00:00
+Refreshing the token...
+Refresh OK. Valid: True, new expiry: 2026-01-01 13:00:00+00:00
+Channel detected : Your Channel Name
+Channel ID       : UCxxxxxxxx
 ```
 
 If you see `invalid_grant: Token has been expired or revoked`, the token is invalid — go back to Step 7 and re-generate.
@@ -277,13 +282,13 @@ If you see `invalid_grant: Token has been expired or revoked`, the token is inva
 ### Test upload (first video only)
 
 ```bash
-python run_upload.py --test-mode
+python -m app.cli upload-youtube --test-mode
 ```
 
 ### Full upload with scheduling
 
 ```bash
-python run_upload.py --interval-hours 12 --tz-name "Asia/Jakarta"
+python -m app.cli upload-youtube --interval-hours 12 --tz-name "Asia/Jakarta"
 ```
 
 The uploader will:
@@ -311,7 +316,7 @@ The uploader will:
 
 4. Run the uploader as usual:
    ```python
-   !python run_upload.py --test-mode
+   !python -m app.cli upload-youtube --test-mode
    ```
 
 ---
@@ -336,9 +341,9 @@ If your OAuth consent screen is in **Testing** mode, Google imposes a restrictio
    ```bash
    rm -f .credentials/youtube_token.json
    ```
-2. **Re-run** `generate_youtube_token.py` (Step 8)
+2. **Re-run** `python -m app.uploaders.youtube_token generate` (Step 8)
 3. **Login again** and authorize — the new token will **not** have the 7-day expiration
-4. **Test** with `test_youtube_refresh.py` (Step 9)
+4. **Test** with `python -m app.uploaders.youtube_token verify` (Step 9)
 
 > **Note:** An "In production" app that hasn't been verified by Google will show a "This app isn't verified" warning during login. For personal use, this is completely safe — just click **Advanced → Go to app → Continue**.
 
@@ -369,7 +374,7 @@ After completing the setup, the **Publish App** button should appear.
 
 | Issue | Solution |
 |---|---|
-| `invalid_grant: Token has been expired or revoked` | Delete old token → re-generate with `generate_youtube_token.py` |
+| `invalid_grant: Token has been expired or revoked` | Delete old token → re-generate with `python -m app.uploaders.youtube_token generate` |
 | `refresh_token` missing in token JSON | Delete token → re-run generator (it uses `access_type="offline"` and `prompt="consent"`) |
 | Token expires after 7 days | Change OAuth app from "Testing" → "In production" (see section above) |
 | "Google hasn't verified this app" warning | Click **Advanced → Go to app → Continue** (safe for personal use) |
@@ -391,10 +396,10 @@ After completing the setup, the **Publish App** button should appear.
  6. Place at .credentials/client_secret.json
  7. pip install google-auth google-auth-oauthlib google-api-python-client
  8. Delete old .credentials/youtube_token.json (if any)
- 9. Run: python youtube_uploader/generate_youtube_token.py
+ 9. Run: python -m app.uploaders.youtube_token generate
 10. Login & authorize YouTube access in browser
-11. Verify: python youtube_uploader/test_youtube_refresh.py
-12. Upload: python run_upload.py --test-mode
+11. Verify: python -m app.uploaders.youtube_token verify
+12. Upload: python -m app.cli upload-youtube --test-mode
 ```
 
 ---

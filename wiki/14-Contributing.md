@@ -7,7 +7,7 @@ We welcome contributions from everyone! Whether it's fixing a bug, adding a feat
 ## Ways to Contribute
 
 ### 🐛 Report Bugs
-Found a bug? [Open an issue](https://github.com/NaufalRizqullah/opensource-clipping/issues/new) with:
+Found a bug? [Open an issue](https://github.com/pdrajan0x/AutoCutClips/issues/new) with:
 - Steps to reproduce
 - Expected vs actual behavior
 - Your environment (OS, Python version, GPU)
@@ -39,8 +39,8 @@ Have an idea? Open an issue with the `enhancement` label describing:
 
 ```bash
 # 1. Fork and clone
-git clone https://github.com/YOUR-USERNAME/opensource-clipping.git
-cd opensource-clipping
+git clone https://github.com/YOUR-USERNAME/AutoCutClips.git
+cd AutoCutClips
 
 # 2. Install dependencies
 pip install -r requirements.txt
@@ -50,7 +50,7 @@ cp .env.sample .env
 # Edit .env with your keys
 
 # 4. Run a test
-python main.py --url "https://youtube.com/watch?v=TEST_VIDEO" --clips 1 --no-bgm --no-broll
+python -m app.cli --url "https://youtube.com/watch?v=TEST_VIDEO" --clips 1 --no-bgm --no-broll
 ```
 
 ---
@@ -58,20 +58,22 @@ python main.py --url "https://youtube.com/watch?v=TEST_VIDEO" --clips 1 --no-bgm
 ## Project Structure
 
 ```text
-opensource-clipping/
-├── main.py                  # CLI entry point
-├── run_upload.py            # YouTube auto-uploader CLI
-├── clipping/
-│   ├── config.py            # Master configuration & argparse
-│   ├── engine.py            # Download → Transcribe → Gemini AI
-│   ├── diarization.py       # Pyannote speaker diarization
-│   ├── metadata.py          # QA metadata normalization
-│   ├── runner.py            # Pipeline orchestrator
-│   ├── story/               # Story mode modules
-│   └── studio/              # Video render engine modules
-├── web/                     # Web API and React Dashboard
-├── youtube_tracker/         # YouTube Tracker Web App
-└── youtube_uploader/        # YouTube upload & scheduling logic
+AutoCutClips/
+├── app/
+│   ├── cli.py                # CLI entry point (python -m app.cli)
+│   ├── clipping/
+│   │   ├── config.py         # Master configuration & argparse
+│   │   ├── runner.py         # Pipeline orchestrator
+│   │   ├── story_runner.py   # Story Clip Mode orchestrator
+│   │   ├── story/            # Story mode helper modules
+│   │   ├── engine/           # Download → Transcribe → Gemini/NVIDIA AI
+│   │   └── studio/           # Video render engine modules
+│   ├── uploaders/            # YouTube + Instagram upload & scheduling logic
+│   ├── tracker/              # YouTube Tracker web app
+│   └── web/                  # Web API and React Dashboard
+├── pyproject.toml            # Dependencies, metadata & console scripts
+├── .env.sample                # API key template
+└── wiki/                      # This documentation
 ```
 
 ---

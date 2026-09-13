@@ -193,7 +193,7 @@ def _parse_download_height(val: str) -> str | int:
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="🎬 OpenSource Clipping — AI Auto-Clipper & Teaser Generator",
+        description="🎬 AutoCutClips — AI Auto-Clipper & Teaser Generator",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -282,7 +282,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--split-screen",
         action="store_true",
         default=USE_SPLIT_SCREEN,
-        help="Enable split-screen mode for podcast with 2 speakers (9:16 only, requires HF_TOKEN for Pyannote)",
+        help="Enable split-screen mode for podcast with 2 speakers (vertical ratios only: 9:16, 1:1, 3:4, 4:5; requires HF_TOKEN for Pyannote)",
     )
     p.add_argument(
         "--diarization-speakers",
@@ -294,7 +294,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--camera-switch",
         action="store_true",
         default=USE_CAMERA_SWITCH,
-        help="Enable camera-switch mode for podcast (9:16 only, requires HF_TOKEN). "
+        help="Enable camera-switch mode for podcast (vertical ratios only: 9:16, 1:1, 3:4, 4:5; requires HF_TOKEN). "
         "Mutually exclusive with --split-screen; split-screen takes precedence if both are set.",
     )
     p.add_argument(

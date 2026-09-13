@@ -1,5 +1,5 @@
 [project]
-name = "opensource-clipping"
+name = "autocutclips"
 version = "1.12.0"
 description = "AI Auto-Clipper & Teaser Generator — converts long videos into viral short-form clips"
 readme = "README.md"

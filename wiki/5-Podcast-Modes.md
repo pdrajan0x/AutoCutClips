@@ -1,6 +1,6 @@
 # 🎙️ Podcast Modes
 
-OpenSource Clipping provides two intelligent rendering modes specifically designed for podcast-style videos with multiple speakers. Both modes support **3+ speakers across multiple scenes**.
+AutoCutClips provides two intelligent rendering modes specifically designed for podcast-style videos with multiple speakers. Both modes support **3+ speakers across multiple scenes**.
 
 ---
 
@@ -34,13 +34,13 @@ Divides the screen into panels to show multiple speakers simultaneously.
 
 ```bash
 # Permanent split-screen (audio-based, needs HF_TOKEN)
-python main.py --url "PODCAST_URL" --split-screen
+python -m app.cli --url "PODCAST_URL" --split-screen
 
 # Dynamic split (auto-toggle between full and split)
-python main.py --url "PODCAST_URL" --split-screen --dynamic-split
+python -m app.cli --url "PODCAST_URL" --split-screen --dynamic-split
 
 # Visual-based trigger (NO TOKEN REQUIRED!)
-python main.py --url "PODCAST_URL" --split-screen --dynamic-split --split-trigger face
+python -m app.cli --url "PODCAST_URL" --split-screen --dynamic-split --split-trigger face
 ```
 
 ### Split Trigger Modes
@@ -58,7 +58,7 @@ python main.py --url "PODCAST_URL" --split-screen --dynamic-split --split-trigge
 Dynamically adjusts the zoom level of each panel to keep framing tight on the speaker and exclude other faces. Essential when speakers sit close together.
 
 ```bash
-python main.py --url "PODCAST_URL" \
+python -m app.cli --url "PODCAST_URL" \
   --split-screen --dynamic-split --split-trigger face \
   --split-auto-zoom --split-v-align 0.4
 ```
@@ -90,13 +90,13 @@ Scene 1: Speaker A talking         Scene 2: Speaker B responds
 
 ```bash
 # Standard camera switch
-python main.py --url "PODCAST_URL" --camera-switch
+python -m app.cli --url "PODCAST_URL" --camera-switch
 
 # With longer hold duration (prevents flickering)
-python main.py --url "PODCAST_URL" --camera-switch --switch-hold-duration 3.0
+python -m app.cli --url "PODCAST_URL" --camera-switch --switch-hold-duration 3.0
 
 # 3-speaker podcast
-python main.py --url "PODCAST_URL" --camera-switch --diarization-speakers 3
+python -m app.cli --url "PODCAST_URL" --camera-switch --diarization-speakers 3
 ```
 
 ### How Camera Switch Renders
@@ -127,7 +127,7 @@ Both modes support 3 or more speakers across multiple scenes.
 
 ```bash
 # 3-speaker podcast with camera switch
-python main.py --url "PODCAST_URL" \
+python -m app.cli --url "PODCAST_URL" \
   --camera-switch \
   --diarization-speakers 3
 ```
@@ -160,14 +160,14 @@ python main.py --url "PODCAST_URL" \
 
 ### Quick & Token-Free
 ```bash
-python main.py --url "PODCAST_URL" \
+python -m app.cli --url "PODCAST_URL" \
   --split-screen --dynamic-split --split-trigger face \
   --face-detector yolo
 ```
 
 ### Best Quality (With Token)
 ```bash
-python main.py --url "PODCAST_URL" \
+python -m app.cli --url "PODCAST_URL" \
   --split-screen --dynamic-split \
   --split-trigger diarization \
   --split-auto-zoom \
@@ -176,7 +176,7 @@ python main.py --url "PODCAST_URL" \
 
 ### Cinematic Interview
 ```bash
-python main.py --url "PODCAST_URL" \
+python -m app.cli --url "PODCAST_URL" \
   --camera-switch \
   --switch-hold-duration 2.5 \
   --face-detector yolo

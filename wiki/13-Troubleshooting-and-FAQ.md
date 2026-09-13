@@ -48,7 +48,7 @@ Get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 
 **Fix:** Use float32:
 ```bash
-python main.py --url "VIDEO_URL" --whisper-compute-type float32
+python -m app.cli --url "VIDEO_URL" --whisper-compute-type float32
 ```
 
 ---
@@ -75,7 +75,7 @@ pip install --upgrade pyannote.audio
 
 **Alternative:** Use `--split-trigger face` which doesn't require a token:
 ```bash
-python main.py --url "VIDEO_URL" --split-screen --dynamic-split --split-trigger face
+python -m app.cli --url "VIDEO_URL" --split-screen --dynamic-split --split-trigger face
 ```
 
 ---
@@ -97,7 +97,7 @@ python main.py --url "VIDEO_URL" --split-screen --dynamic-split --split-trigger 
 
 **Fix:** The system automatically excludes AV1 (`av01`) codecs. If issues persist, try:
 ```bash
-python main.py --url "VIDEO_URL" --source-height 1080
+python -m app.cli --url "VIDEO_URL" --source-height 1080
 ```
 
 ---
@@ -158,7 +158,7 @@ Yes! The project is open source. However, ensure your BGM music is royalty-free 
 
 Use YouTube's built-in subtitles:
 ```bash
-python main.py --url "VIDEO_URL" --use-dlp-subs
+python -m app.cli --url "VIDEO_URL" --use-dlp-subs
 ```
 
 ---
@@ -177,7 +177,7 @@ Yes! Supported platforms:
 1. Find the `gemini_response.json` in your output directory
 2. Re-run with `--load-gemini-json` to skip the AI analysis step:
    ```bash
-   python main.py --url "VIDEO_URL" --load-gemini-json
+   python -m app.cli --url "VIDEO_URL" --load-gemini-json
    ```
 
 ---

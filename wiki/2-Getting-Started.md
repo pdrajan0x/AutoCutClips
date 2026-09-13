@@ -1,6 +1,6 @@
 # 🚀 Getting Started
 
-This guide walks you through setting up OpenSource Clipping on your local machine.
+This guide walks you through setting up AutoCutClips on your local machine.
 
 ---
 
@@ -24,8 +24,8 @@ This guide walks you through setting up OpenSource Clipping on your local machin
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/NaufalRizqullah/opensource-clipping.git
-cd opensource-clipping
+git clone https://github.com/pdrajan0x/AutoCutClips.git
+cd AutoCutClips
 ```
 
 ### 2. Install Dependencies
@@ -59,7 +59,7 @@ NVIDIA_API_KEY=your-nvidia-api-key-here       # Optional (for NVIDIA NIM provide
 ### 4. Run Your First Clip
 
 ```bash
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID"
+python -m app.cli --url "https://youtube.com/watch?v=VIDEO_ID"
 ```
 
 That's it! The pipeline will:
@@ -93,22 +93,22 @@ outputs/
 
 ### Standard Clipping (7 clips, vertical)
 ```bash
-python main.py --url "VIDEO_URL" --clips 7 --ratio "9:16"
+python -m app.cli --url "VIDEO_URL" --clips 7 --ratio "9:16"
 ```
 
 ### Landscape Output (YouTube format)
 ```bash
-python main.py --url "VIDEO_URL" --ratio "16:9" --clips 5
+python -m app.cli --url "VIDEO_URL" --ratio "16:9" --clips 5
 ```
 
 ### Podcast with Split-Screen
 ```bash
-python main.py --url "PODCAST_URL" --split-screen --dynamic-split --split-trigger face
+python -m app.cli --url "PODCAST_URL" --split-screen --dynamic-split --split-trigger face
 ```
 
 ### No Subtitles, No BGM (Clean output)
 ```bash
-python main.py --url "VIDEO_URL" --no-subs --no-bgm --no-broll
+python -m app.cli --url "VIDEO_URL" --no-subs --no-bgm --no-broll
 ```
 
 ---

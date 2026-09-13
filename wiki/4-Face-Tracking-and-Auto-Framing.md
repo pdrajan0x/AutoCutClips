@@ -1,6 +1,6 @@
 # 🎯 Face Tracking & Auto-Framing
 
-OpenSource Clipping uses AI-powered face detection to automatically keep the subject centered in the frame when cropping from 16:9 to vertical (9:16, 1:1, 3:4, 4:5) formats.
+AutoCutClips uses AI-powered face detection to automatically keep the subject centered in the frame when cropping from 16:9 to vertical (9:16, 1:1, 3:4, 4:5) formats.
 
 ---
 
@@ -47,7 +47,7 @@ Source Frame (16:9)
 
 ```bash
 # Use YOLO with medium model
-python main.py --url "VIDEO_URL" --face-detector yolo --yolo-size 8m
+python -m app.cli --url "VIDEO_URL" --face-detector yolo --yolo-size 8m
 ```
 
 ---
@@ -117,7 +117,7 @@ If you don't need face tracking for square/portrait ratios, use `--static-crop`:
 
 ```bash
 # Fast center crop without AI detection
-python main.py --url "VIDEO_URL" --ratio "1:1" --static-crop
+python -m app.cli --url "VIDEO_URL" --ratio "1:1" --static-crop
 ```
 
 This dramatically speeds up rendering by bypassing the face detection step entirely.
@@ -131,22 +131,22 @@ See the tracking algorithm in action with a 16:9 "Director's Console" view:
 
 ```bash
 # Visualize tracking (generates dev video only)
-python main.py --url "VIDEO_URL" --dev-mode
+python -m app.cli --url "VIDEO_URL" --dev-mode
 
 # Generate BOTH final output + dev visualization
-python main.py --url "VIDEO_URL" --dev-mode-with-output
+python -m app.cli --url "VIDEO_URL" --dev-mode-with-output
 
 # Merged side-by-side ultrawide view
-python main.py --url "VIDEO_URL" --dev-mode-with-output-merge
+python -m app.cli --url "VIDEO_URL" --dev-mode-with-output-merge
 ```
 
 ### Debug Overlays
 ```bash
 # Draw yellow bounding boxes around detected faces
-python main.py --url "VIDEO_URL" --box-face-detection
+python -m app.cli --url "VIDEO_URL" --box-face-detection
 
 # Draw crosshair tracking lines from face to crop boundaries
-python main.py --url "VIDEO_URL" --track-lines
+python -m app.cli --url "VIDEO_URL" --track-lines
 ```
 
 ---

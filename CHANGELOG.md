@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the **OpenSource Clipping** project will be documented in this file.
+All notable changes to the **AutoCutClips** project will be documented in this file.
 
 **The Standard Structure (SemVer)**
 - **Major (X.y.z)**: Incremented for incompatible API changes (breaking changes).
@@ -494,7 +494,7 @@ All notable changes to the **OpenSource Clipping** project will be documented in
 ## [v1.0.0] - 2026-04-27
 
 ### Added
-- **🎉 MAJOR STABLE RELEASE**: The 1.0.0 release graduates the `opensource-clipping` pipeline into a fully production-ready state! It finalizes all major milestone features including the multi-provider AI backend, High-Resolution renders, and the highly robust Dynamic Split-Screen / Camera-Tracking engines.
+- **🎉 MAJOR STABLE RELEASE**: The 1.0.0 release graduates the `autocutclips` pipeline into a fully production-ready state! It finalizes all major milestone features including the multi-provider AI backend, High-Resolution renders, and the highly robust Dynamic Split-Screen / Camera-Tracking engines.
 
 ---
 

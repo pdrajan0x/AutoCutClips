@@ -12,7 +12,7 @@ Open a new [Google Colab](https://colab.research.google.com/) notebook and set t
 
 ```python
 !rm -rf ./* ./.*
-!git clone https://github.com/NaufalRizqullah/opensource-clipping.git .
+!git clone https://github.com/pdrajan0x/AutoCutClips.git .
 !pip install -r requirements.txt
 ```
 
@@ -41,7 +41,7 @@ RASIO = "9:16"
 FONT_STYLE = "DEFAULT"
 GEMINI_MODEL = "gemini-3-flash-preview"
 
-!python main.py \
+!python -m app.cli \
   --url "{URL_YOUTUBE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
@@ -65,7 +65,7 @@ RASIO = "9:16"
 FONT_STYLE = "DEFAULT"
 GEMINI_MODEL = "gemini-2.0-flash"
 
-!python main.py \
+!python -m app.cli \
   --url "{URL_YOUTUBE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
@@ -89,7 +89,7 @@ RASIO = "9:16"
 FONT_STYLE = "DEFAULT"
 GEMINI_MODEL = "gemini-2.0-flash"
 
-!python main.py \
+!python -m app.cli \
   --url "{URL_YOUTUBE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
@@ -116,7 +116,7 @@ When running on **Kaggle** (which has limited T4 configurations), use `float32` 
 ```python
 WHISPER_COMPUTE_TYPE = "float32"
 
-!python main.py \
+!python -m app.cli \
   --url "{URL_YOUTUBE}" \
   --clips 5 \
   --whisper-compute-type "{WHISPER_COMPUTE_TYPE}" \
@@ -178,7 +178,7 @@ files.download("results.zip")
   # Then copy outputs to Drive
   !cp -r outputs/ /content/drive/MyDrive/clipping_results/
   ```
-- **Ready-to-use Notebook**: Check `notebooks/Lib_OpenSource_Clipping.ipynb` in the repo for a pre-configured template.
+- **Ready-to-use Notebook**: Check `notebooks/Lib_AutoCutClips.ipynb` in the repo for a pre-configured template.
 
 ---
 

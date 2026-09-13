@@ -1,5 +1,5 @@
 """
-app — OpenSource Clipping: AI Auto-Clipper & Teaser Generator.
+app — AutoCutClips: AI Auto-Clipper & Teaser Generator.
 
 Packages:
   clipping/  the clipping engine, Studio renderers and Story Clip mode

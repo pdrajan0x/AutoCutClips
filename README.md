@@ -1,10 +1,10 @@
 <br />
 <div align="center">
-  <a href="https://github.com/NaufalRizqullah/opensource-clipping">
-    <img src="assets/images/opensource-clipping-logo-editable.svg" alt="Logo" width="350">
+  <a href="https://github.com/pdrajan0x/AutoCutClips">
+    <img src="assets/images/AutoCutClips-logo-editable.svg" alt="Logo" width="350">
   </a>
 
-  <h3 align="center">OpenSource Clipping</h3>
+  <h3 align="center">AutoCutClips</h3>
 
   <p align="center">
     <strong>Ultimate AI Auto-Clipper & Teaser Generator</strong><br>
@@ -13,9 +13,9 @@
     <br />
     <a href="README_ID.md">🇮🇩 Baca dalam Bahasa Indonesia</a>
     &middot;
-    <a href="https://github.com/NaufalRizqullah/opensource-clipping/issues/new">Report Bug</a>
+    <a href="https://github.com/pdrajan0x/AutoCutClips/issues/new">Report Bug</a>
     &middot;
-    <a href="https://github.com/NaufalRizqullah/opensource-clipping/issues/new">Request Feature</a>
+    <a href="https://github.com/pdrajan0x/AutoCutClips/issues/new">Request Feature</a>
   </p>
 </div>
 
@@ -39,9 +39,9 @@
 | **Watermark Engine** | Text & image watermarks with adjustable position (9 anchors), padding, opacity, and auto-scaling |
 | **Cross-Platform Metadata** | YouTube title/description/tags + TikTok caption — all in English |
 | **Auto YouTube Uploader** | Automatically upload highlight clips to YouTube with scheduling support and full metadata (optional) |
-| **Auto Facebook Reels Uploader** | Upload Reels to Facebook Pages via Meta Graph API with smart scheduling — first clip publishes immediately, subsequent clips auto-schedule at configurable intervals (optional) |
-| **Podcast Split-Screen** | Auto speaker diarization via **Pyannote** with top-bottom split-screen layout for podcasts (9:16). Supports **3+ speakers across multiple scenes** with per-speaker frozen frame fallback |
-| **Podcast Camera Switch** | Auto active-speaker detection with scene-aware switching — full 9:16 crop focuses on whoever is talking; blurred pillarbox only when speakers in the same scene talk simultaneously (9:16) |
+| **Auto Instagram Reels Uploader** | Publish Reels to an Instagram Business/Creator account via the Instagram Graph API, with a locally-enforced publish interval (the Graph API itself has no native scheduling) (optional) |
+| **Podcast Split-Screen** | Auto speaker diarization via **Pyannote** with top-bottom split-screen layout for podcasts. Works on any vertical/square ratio (`9:16`, `1:1`, `3:4`, `4:5`). Supports **3+ speakers across multiple scenes** with per-speaker frozen frame fallback |
+| **Podcast Camera Switch** | Auto active-speaker detection with scene-aware switching — full-frame crop focuses on whoever is talking; blurred pillarbox only when speakers in the same scene talk simultaneously. Works on any vertical/square ratio (`9:16`, `1:1`, `3:4`, `4:5`) |
 | **AI Voice-Over** | Converts auto-clips into original commentary/reaction videos using **Gemini** (script generation) and **edge-tts** (free text-to-speech), complete with audio ducking, text override, and ambient edge glow |
 
 > 🎬 **NEW: Story Clip Mode (`--story-mode`)**  
@@ -55,7 +55,8 @@
 - **CUDA GPU** recommended (for Whisper; CPU fallback available)
 - **Google Gemini API Key** ([get one here](https://aistudio.google.com/apikey))
 - **Pexels API Key** (optional, for B-roll — [get one here](https://www.pexels.com/api/))
-- **HuggingFace Token** (optional, for split-screen / camera-switch — [get one here](https://huggingface.co/settings/tokens), requires accepting [Pyannote model agreement](https://huggingface.co/pyannote/speaker-diarization-3.1))
+- **HuggingFace Token** (optional, for split-screen `diarization` trigger / camera-switch — [get one here](https://huggingface.co/settings/tokens), requires accepting [Pyannote model agreement](https://huggingface.co/pyannote/speaker-diarization-3.1))
+- **NVIDIA API Key** (optional, only if using `--ai-provider nvidia` — [get one here](https://build.nvidia.com/))
 
 ## ☁️ Running on Google Colab (Recommended)
 
@@ -65,7 +66,7 @@ Open a new Google Colab notebook, set the Runtime to **T4 GPU**, and create the 
 **Cell 1: Setup & Clone**
 ```python
 !rm -rf ./* ./.*
-!git clone https://github.com/your-username/opensource-clipping.git .
+!git clone https://github.com/pdrajan0x/AutoCutClips.git .
 !pip install -r requirements.txt
 ```
 
@@ -92,7 +93,7 @@ GEMINI_MODEL = "gemini-3-flash-preview"
 # Use 'float32' for Kaggle CPU/T4 limitations, or 'float16' for standard Colab T4 GPUs
 WHISPER_COMPUTE_TYPE = "float32"
 
-!python main.py \
+!python -m app.cli \
   --url "{URL_YOUTUBE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
@@ -104,7 +105,7 @@ WHISPER_COMPUTE_TYPE = "float32"
   --no-bgm
 ```
 
-*(Note: We have also included `notebooks/Lib_OpenSource_Clipping.ipynb` in the repo as a ready-to-use template).*
+*(Note: We have also included `notebooks/Lib_AutoCutClips.ipynb` in the repo as a ready-to-use template).*
 
 ---
 
@@ -112,7 +113,7 @@ WHISPER_COMPUTE_TYPE = "float32"
 
 The **Clipping Studio** is a browser-based dashboard hosted for free on **GitHub Pages** that connects to a Kaggle/Colab notebook as its backend — giving you a full GUI to control the AI clipping pipeline without any local setup.
 
-**🔗 Open Studio:** [naufalrizqullah.github.io/opensource-clipping/studio/](https://naufalrizqullah.github.io/opensource-clipping/studio/)
+**🔗 Open Studio:** [pdrajan0x.github.io/AutoCutClips/studio/](https://pdrajan0x.github.io/AutoCutClips/studio/)
 
 ### How It Works
 
@@ -121,7 +122,7 @@ The **Clipping Studio** is a browser-based dashboard hosted for free on **GitHub
 │   GitHub Pages      │ ◄──────────────────►   │   Kaggle / Colab         │
 │   (Static Frontend) │                        │   (FastAPI + GPU)        │
 │                     │   POST /api/jobs       │                          │
-│   studio/index.html │ ────────────────────►  │   web/api/app.py         │
+│   studio/index.html │ ────────────────────►  │   app/web/api/app.py         │
 │   studio/new-job    │   GET  /api/jobs/:id   │   clipping pipeline      │
 │   studio/settings   │ ◄────────────────────  │   Whisper + Gemini       │
 └─────────────────────┘                        └──────────────────────────┘
@@ -130,9 +131,9 @@ The **Clipping Studio** is a browser-based dashboard hosted for free on **GitHub
 
 ### Quick Start
 
-1. **Start the backend** — Open `notebooks/Kaggle_Studio_Server.ipynb` in Kaggle (or Colab), add your API keys to Secrets, and run all cells. Copy the **Public URL** from the output.
+1. **Start the backend** — Open `notebooks/kaggle-studio-server.ipynb` in Kaggle (or Colab), add your API keys to Secrets, and run all cells. Copy the **Public URL** from the output.
 
-2. **Open the Studio** — Visit [the Studio page](https://naufalrizqullah.github.io/opensource-clipping/studio/) in your browser.
+2. **Open the Studio** — Visit [the Studio page](https://pdrajan0x.github.io/AutoCutClips/studio/) in your browser.
 
 3. **Connect** — Click the **Connect** button in the sidebar, paste the tunnel URL, and click **Test & Connect**.
 
@@ -146,8 +147,8 @@ The **Clipping Studio** is a browser-based dashboard hosted for free on **GitHub
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/your-username/opensource-clipping.git
-cd opensource-clipping
+git clone https://github.com/pdrajan0x/AutoCutClips.git
+cd AutoCutClips
 
 # 2. Install dependencies (pick one)
 pip install -r requirements.txt          # pip / Colab
@@ -158,20 +159,20 @@ cp .env.sample .env
 # Edit .env and add your GOOGLE_API_KEY
 
 # 4. Run (Must include --url)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID"
+python -m app.cli --url "https://youtube.com/watch?v=VIDEO_ID"
 # 5. Examples of Execution
 
 # Standard run (Default options with 5 clips)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" --clips 5 --ratio 16:9
+python -m app.cli --url "https://youtube.com/watch?v=VIDEO_ID" --clips 5 --ratio 16:9
 
 # Prefer highest available source quality (default behavior)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" --source-height max
+python -m app.cli --url "https://youtube.com/watch?v=VIDEO_ID" --source-height max
 
 # Cap source download to 1440p (2K)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" --source-height 1440
+python -m app.cli --url "https://youtube.com/watch?v=VIDEO_ID" --source-height 1440
 
 # Sharper output tuning (works for normal and dynamic-split modes)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" \
+python -m app.cli --url "https://youtube.com/watch?v=VIDEO_ID" \
   --source-height 2160 \
   --video-cq 19 \
   --video-crf 17 \
@@ -179,20 +180,20 @@ python main.py --url "https://youtube.com/watch?v=VIDEO_ID" \
   --video-scale-algo lanczos
 
 # Advanced run (Using YOLOv8 GPU Face Tracking & Custom Fonts)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" \
+python -m app.cli --url "https://youtube.com/watch?v=VIDEO_ID" \
   --clips 7 \
   --face-detector yolo \
   --yolo-size 8m \
   --font-style STORYTELLER
 
 # Podcast Split-Screen (2 speakers, 9:16)
-python main.py --url "https://youtube.com/watch?v=PODCAST_ID" \
+python -m app.cli --url "https://youtube.com/watch?v=PODCAST_ID" \
   --clips 3 \
   --ratio "9:16" \
   --split-screen
 
 # Podcast Camera Switch (auto-switches to active speaker, blurred pillarbox on overlap)
-python main.py --url "https://youtube.com/watch?v=PODCAST_ID" \
+python -m app.cli --url "https://youtube.com/watch?v=PODCAST_ID" \
   --clips 3 \
   --ratio "9:16" \
   --camera-switch \
@@ -200,50 +201,65 @@ python main.py --url "https://youtube.com/watch?v=PODCAST_ID" \
   --switch-blend-duration 0.0
 
 # Multi-Speaker Podcast (3 speakers across 2 scenes)
-python main.py --url "https://youtube.com/watch?v=PODCAST_ID" \
+python -m app.cli --url "https://youtube.com/watch?v=PODCAST_ID" \
   --clips 3 \
   --ratio "9:16" \
   --camera-switch \
   --diarization-speakers 3
 
 # Manual Custom Hook (using external .mp4 clip)
-python main.py --url "VIDEO_URL" --hook-source "DRIVE_URL_OR_PATH" --hook-source-start 5.0 --hook-duration 4
+python -m app.cli --url "VIDEO_URL" --hook-source "DRIVE_URL_OR_PATH" --hook-source-start 5.0 --hook-duration 4
 
 # Ultra-HD 2K Rendering (Fetch 1440p and render at native 1440p vertical resolution with sharpening)
-python main.py --url "VIDEO_URL" --source-height 1440 --render-height source --video-sharpen
+python -m app.cli --url "VIDEO_URL" --source-height 1440 --render-height source --video-sharpen
 
 # Use NVIDIA NIM (DeepSeek-V3) instead of Gemini
-python main.py --url "VIDEO_URL" --ai-provider nvidia --nvidia-model "deepseek-ai/deepseek-v4-pro"
+python -m app.cli --url "VIDEO_URL" --ai-provider nvidia --nvidia-model "deepseek-ai/deepseek-v4-pro"
 
 # Square output for Instagram Feed (1:1)
-python main.py --url "VIDEO_URL" --ratio "1:1" --clips 5
+python -m app.cli --url "VIDEO_URL" --ratio "1:1" --clips 5
 
 # Instagram/Facebook portrait (4:5)
-python main.py --url "VIDEO_URL" --ratio "4:5" --clips 5
+python -m app.cli --url "VIDEO_URL" --ratio "4:5" --clips 5
 
 # Classic portrait (3:4)
-python main.py --url "VIDEO_URL" --ratio "3:4" --clips 5
+python -m app.cli --url "VIDEO_URL" --ratio "3:4" --clips 5
 
 # TikTok source
-python main.py --url "https://www.tiktok.com/@username/video/1234567890" --source tiktok --clips 3
+python -m app.cli --url "https://www.tiktok.com/@username/video/1234567890" --source tiktok --clips 3
 
 # Instagram source
-python main.py --url "https://www.instagram.com/reel/123456789/" --source instagram --clips 3
+python -m app.cli --url "https://www.instagram.com/reel/123456789/" --source instagram --clips 3
 
 # Google Drive source
-python main.py --url "https://drive.google.com/file/d/1234567890/view" --source gdrive --clips 3
+python -m app.cli --url "https://drive.google.com/file/d/1234567890/view" --source gdrive --clips 3
 ```
+
+## 🧭 Subcommands
+
+`python -m app.cli <subcommand> ...` (also installed as standalone console scripts, e.g. `clipping`). If the first argument isn't a recognized subcommand, everything is forwarded to the clip/story pipeline:
+
+| Subcommand | Console script | What it does |
+|---|---|---|
+| `clip` (default) | `clipping` | Auto-clip pipeline |
+| `story` | — | Same pipeline, with `--story-mode` implied |
+| `upload-youtube` | `clipping-upload-youtube` | Upload/schedule clips to YouTube |
+| `upload-instagram` | `clipping-upload-instagram` | Publish clips as Instagram Reels |
+| `reschedule-youtube` | `clipping-reschedule-youtube` | Re-space already-scheduled YouTube videos |
+| `youtube-token` | `clipping-youtube-token` | Generate/verify the YouTube OAuth token |
+| — | `clipping-tracker` | Run the YouTube Tracker web app |
 
 ## ⚙️ CLI Options
 
 ```
-python main.py --help
+python -m app.cli --help
 ```
 
 | Argument | Default | Description |
 |---|---|---|
-| `--url`, `-u` | — | Video URL to process (Required) |
+| `--url`, `-u` | — | Video URL to process (Required unless `--story-mode`) |
 | `--source` | `youtube` | Video source platform. Choices: `youtube`, `tiktok`, `instagram`, `gdrive`. |
+| `--tiktok` | — | **[Deprecated]** Use `--source tiktok` instead |
 | `--clips`, `-n` | `7` | Number of highlight clips to generate |
 | `--ratio`, `-r` | `9:16` | Output aspect ratio (`9:16`, `16:9`, `1:1`, `3:4`, `4:5`) |
 | `--source-height` | `max` | Preferred source download max height (`max`, `1080`, `1440`, `2160`, etc.) |
@@ -294,11 +310,11 @@ python main.py --help
 | `--gemini-model` | `gemini-3-flash-preview` | Gemini model name |
 | `--gemini-fallback-model` | `gemini-2.5-flash` | Gemini fallback model name if main model fails |
 | `--load-gemini-json` | `False` | Load the saved `gemini_response.json` from the output directory to bypass the Gemini API call |
-| `--split-screen` | `False` | Enable split-screen mode for podcasts (9:16 only, requires `HF_TOKEN`). Supports 3+ speakers across multiple scenes |
+| `--split-screen` | `False` | Enable split-screen mode for podcasts (any vertical/square ratio — `9:16`, `1:1`, `3:4`, `4:5`; `--split-trigger diarization` requires `HF_TOKEN`). Supports 3+ speakers across multiple scenes |
 | `--dynamic-split` | `False` | Automatically switch between full-screen and split-screen based on activity (requires `--split-screen`) |
 | `--split-trigger` | `diarization` | Trigger for splitting: `diarization` (audio-based) or `face` (visual count) |
 | `--diarization-speakers` | `auto` | Number of speakers for diarization (set to `3` for exact 3 speakers, or `auto` for visual AI auto-detection) |
-| `--camera-switch` | `False` | Enable camera-switch mode for podcasts — full 9:16 crop switches to the active speaker; blurred pillarbox on simultaneous speech (9:16 only, requires `HF_TOKEN`) |
+| `--camera-switch` | `False` | Enable camera-switch mode for podcasts — full-frame crop switches to the active speaker; blurred pillarbox on simultaneous speech (any vertical/square ratio — `9:16`, `1:1`, `3:4`, `4:5`; requires `HF_TOKEN`) |
 | `--switch-hold-duration` | `2.0` | Min seconds to hold on current speaker before switching (camera-switch only) |
 | `--switch-blend-duration` | `0.0` | Transition duration when switching speakers (0 = instant snap, 0.2 = smooth blend) |
 | `--split-zoom` | `1.0` | Manual zoom factor for split-screen panels (e.g. 1.2, 1.5) |
@@ -317,7 +333,7 @@ python main.py --help
 
 ## 📐 Aspect Ratios
 
-OpenSource Clipping supports **5 output aspect ratios**. All vertical/square ratios include **face-tracking** by default to keep the subject centered.
+AutoCutClips supports **5 output aspect ratios**. All vertical/square ratios include **face-tracking** by default to keep the subject centered.
 
 | Ratio | Output | Face Tracking | Best For |
 |---|---|---|---|
@@ -373,34 +389,34 @@ Mimics professional editing by focusing only on the active speaker in full scree
 
 ```bash
 # 1. Standard AI Clipping (7 clips, 9:16)
-python main.py --url "VIDEO_URL"
+python -m app.cli --url "VIDEO_URL"
 
 # 2. Dynamic Split-Screen (Visual-based, NO TOKEN REQUIRED)
-python main.py --url "VIDEO_URL" --split-screen --dynamic-split --split-trigger face
+python -m app.cli --url "VIDEO_URL" --split-screen --dynamic-split --split-trigger face
 
 # 3. Dynamic Split-Screen (Audio-based, Highlight active speaker, needs HF_TOKEN)
-python main.py --url "VIDEO_URL" --split-screen --dynamic-split --split-trigger diarization
+python -m app.cli --url "VIDEO_URL" --split-screen --dynamic-split --split-trigger diarization
 
 # 4. Cinematic Camera Switch (Needs HF_TOKEN)
-python main.py --url "VIDEO_URL" --camera-switch
+python -m app.cli --url "VIDEO_URL" --camera-switch
 
 # 5. Smart Separation Split-Screen (Auto-Zoom & Vertical Track)
-python main.py --url "VIDEO_URL" --split-screen --dynamic-split --split-trigger face --split-auto-zoom --split-v-align 0.4
+python -m app.cli --url "VIDEO_URL" --split-screen --dynamic-split --split-trigger face --split-auto-zoom --split-v-align 0.4
 
 # 6. Square output (1:1) with Split-Screen
-python main.py --url "VIDEO_URL" --ratio "1:1" --split-screen --dynamic-split --split-trigger face
+python -m app.cli --url "VIDEO_URL" --ratio "1:1" --split-screen --dynamic-split --split-trigger face
 
 # 7. Hook V2 + Segment Trimming (default)
-python main.py --url "VIDEO_URL" --hook-v2
+python -m app.cli --url "VIDEO_URL" --hook-v2
 
 # 8. Hook V2 + Aggressive Silence Trimming
-python main.py --url "VIDEO_URL" --hook-v2 --silence-trim
+python -m app.cli --url "VIDEO_URL" --hook-v2 --silence-trim
 
 # 9. Hook V2 without Segment Trimming (full render)
-python main.py --url "VIDEO_URL" --hook-v2 --no-segment-trim
+python -m app.cli --url "VIDEO_URL" --hook-v2 --no-segment-trim
 
 # 10. Hook V2 Custom: 4 micro-hooks with glitch style
-python main.py --url "VIDEO_URL" --hook-v2 --hook-v2-items 4 --hook-v2-style "glitch_fast"
+python -m app.cli --url "VIDEO_URL" --hook-v2 --hook-v2-items 4 --hook-v2-style "glitch_fast"
 ```
 
 > [!IMPORTANT]
@@ -420,10 +436,10 @@ When you pass the `--voiceover` flag, the pipeline will:
 **Example Usage:**
 ```bash
 # Basic voice-over (Uses default en-US-AvaNeural and English language)
-python main.py --url "VIDEO_URL" --voiceover
+python -m app.cli --url "VIDEO_URL" --voiceover
 
 # Voice-over in Indonesian with reaction style
-python main.py --url "VIDEO_URL" --voiceover --voiceover-lang id --voiceover-voice id-ID-ArdiNeural --voiceover-style reaction
+python -m app.cli --url "VIDEO_URL" --voiceover --voiceover-lang id --voiceover-voice id-ID-ArdiNeural --voiceover-style reaction
 ```
 
 **Config Options:**
@@ -518,7 +534,7 @@ RASIO = "9:16"
 FONT_STYLE = "DEFAULT"
 GEMINI_MODEL = "gemini-2.0-flash"
 
-!python main.py \
+!python -m app.cli \
   --url "{URL_YOUTUBE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
@@ -543,7 +559,7 @@ RASIO = "9:16"
 FONT_STYLE = "DEFAULT"
 GEMINI_MODEL = "gemini-2.0-flash"
 
-!python main.py \
+!python -m app.cli \
   --url "{URL_YOUTUBE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
@@ -564,27 +580,27 @@ GEMINI_MODEL = "gemini-2.0-flash"
 ## 📂 Project Structure
 
 ```text
-opensource-clipping/
-├── main.py                  # CLI entry point
-├── run_upload.py            # YouTube auto-uploader CLI
-├── run_fb_upload.py         # Facebook Pages Reels uploader CLI
-├── pyproject.toml           # Dependencies & metadata
+AutoCutClips/
+├── pyproject.toml           # Dependencies, metadata & console scripts
 ├── .env.sample              # API key template
 ├── .gitignore
 ├── README.md                # English docs
 ├── README_ID.md             # Indonesian docs
-├── clipping/
-│   ├── config.py            # Master configuration & argparse
-│   ├── engine.py            # Download → Transcribe → Gemini AI
-│   ├── diarization.py       # Pyannote speaker diarization
-│   ├── metadata.py          # QA metadata normalization
-│   ├── runner.py            # Pipeline orchestrator
-│   ├── story/               # Story mode modules
-│   └── studio/              # Video render engine modules
-├── facebook_uploader/       # Facebook Pages Reels upload & scheduling
-├── web/                     # Web API and React Dashboard
-├── youtube_tracker/         # YouTube Tracker Web App
-└── youtube_uploader/        # YouTube upload & scheduling logic
+├── sources.json             # Story Clip Mode: video source registry
+├── story_recipe.json        # Story Clip Mode: clip assembly recipe
+├── upload_safety.json       # YouTube uploader safety rails
+└── app/
+    ├── cli.py                # CLI entry point (python -m app.cli)
+    ├── clipping/
+    │   ├── config.py         # Master configuration & argparse
+    │   ├── runner.py         # Pipeline orchestrator
+    │   ├── story_runner.py   # Story Clip Mode orchestrator
+    │   ├── story/            # Story mode helper modules
+    │   ├── engine/           # Download → Transcribe → Gemini/NVIDIA AI
+    │   └── studio/           # Video render engine modules
+    ├── uploaders/            # YouTube + Instagram upload & scheduling logic
+    ├── tracker/              # YouTube Tracker web app
+    └── web/                  # Web API and React Dashboard
 ```
 
 ## 📊 Results
@@ -631,56 +647,64 @@ For each clip, the pipeline creates an `outputs/` directory and generates:
 
 ## 📺 Auto-Upload to YouTube
 
-The project now includes a standalone YouTube auto-uploader with scheduling support!
+The project includes a standalone YouTube auto-uploader with scheduling support!
 
-1. Place your configured `youtube_token.json` file inside the `.credentials/` directory.
-2. After the rendering process finishes, the script will automatically read from the generated `outputs/` directory (e.g., `outputs/render_manifest.json` and the final videos). Simply run the uploader:
+1. Generate your OAuth token: `python -m app.uploaders.youtube_token generate` (see the [YouTube API Setup Guide](wiki/15-YouTube-API-Setup-Guide.md) for the full walkthrough). This writes `.credentials/youtube_token.json` directly.
+2. After the rendering process finishes, the uploader automatically reads from the generated `outputs/` directory (e.g., `outputs/render_manifest.json` and the final videos). Simply run it:
    ```bash
-   # Basic run (uses default 8-hour interval and auto timezone)
-   python run_upload.py
+   # Basic run (uses the default 24-hour interval, gated by upload_safety.json)
+   python -m app.cli upload-youtube
 
    # Or run with custom arguments (example):
-   python run_upload.py --interval-hours 12 --tz-name "Asia/Jakarta"
+   python -m app.cli upload-youtube --interval-hours 12 --tz-name "Asia/Jakarta"
    ```
-3. To run a test with only the first video, use `python run_upload.py --test-mode`. Run `python run_upload.py --help` to see all scheduling and timezone options.
+3. To run a test with only the first video, use `python -m app.cli upload-youtube --test-mode`. Run `python -m app.cli upload-youtube --help` to see all scheduling, safety-config, and timezone options.
+4. To re-space videos that are still scheduled/private, use `python -m app.cli reschedule-youtube [--apply]` (dry-run by default).
 
-## 📘 Auto-Upload to Facebook Pages (Reels)
+## 📘 Auto-Upload to Instagram (Reels)
 
-The project also includes a standalone Facebook Pages Reels uploader with native scheduling support via the Meta Graph API!
+The project also includes a standalone Instagram Reels publisher built on the **Instagram Graph API**. It replaces the project's older Facebook Page Reels uploader — there is no Facebook Page uploader anymore.
 
 **Prerequisites:**
-- A Facebook Page Access Token (long-lived) with `pages_manage_posts` and `pages_read_engagement` permissions.
-- Set `META_PAGE_ID`, `META_PAGE_ACCESS_TOKEN`, and `META_GRAPH_VERSION` in your `.env` file.
+- An Instagram Business/Creator account linked to a Facebook Page.
+- A long-lived access token with the `instagram_content_publish` permission.
+- Set `IG_USER_ID` (the Instagram **User** ID, not the Facebook Page ID) and `IG_ACCESS_TOKEN` in your `.env` file. `IG_GRAPH_VERSION` (default `v25.0`) and `IG_PUBLIC_BASE_URL` are optional. The older `META_PAGE_ACCESS_TOKEN` / `META_GRAPH_VERSION` variables still work as fallbacks.
 
 **How it works:**
-1. Validates your Page Access Token against the Graph API.
-2. Reads existing scheduled posts to determine the next available time slot.
-3. Uploads each clip as a Reel: create session → upload binary → poll processing → publish/schedule.
-4. First clip publishes immediately if no queue exists; subsequent clips are scheduled at 5-hour intervals (configurable).
-5. If any step fails, the batch **stops immediately** (no fallback to instant publish).
+1. Validates the access token against the Graph API.
+2. Creates a media container (`media_type=REELS`) — either via `video_url` (if `IG_PUBLIC_BASE_URL` is set) or a resumable binary upload.
+3. Polls the container until it's `FINISHED`, then publishes it.
+4. Because the Graph API has **no** native scheduled-publish parameter, `--interval-hours` is enforced locally: clips whose slot hasn't arrived are marked `deferred` and published by a later run (e.g. from cron). Pass `--publish-now` to ignore the interval and publish the whole batch back to back.
+5. If a publish fails, the batch **stops immediately** rather than continuing to hammer the API.
 
 ```bash
-# Basic run (reads .env for META_PAGE_ID & META_PAGE_ACCESS_TOKEN)
-python run_fb_upload.py
+# Basic run (reads .env for IG_USER_ID & IG_ACCESS_TOKEN)
+python -m app.cli upload-instagram
 
-# Test mode — only upload the first clip
-python run_fb_upload.py --test-mode
+# Test mode — only publish the first clip
+python -m app.cli upload-instagram --test-mode
 
-# Custom interval (3 hours between videos)
-python run_fb_upload.py --interval-hours 3
+# Custom interval (3 hours between Reels)
+python -m app.cli upload-instagram --interval-hours 3
+
+# Ignore the interval and publish the whole batch back to back
+python -m app.cli upload-instagram --publish-now
 
 # See all options
-python run_fb_upload.py --help
+python -m app.cli upload-instagram --help
 ```
 
 | Argument | Default | Description |
 |---|---|---|
-| `--manifest-file` | `outputs/render_manifest.json` | Input manifest from clipping pipeline |
-| `--result-file` | `outputs/fb_upload_results.json` | Output JSON trace file |
-| `--updated-manifest` | `outputs/render_manifest_fb_uploaded.json` | Updated manifest with upload status |
-| `--tz-name` | `Asia/Makassar` | Timezone for scheduling (IANA format) |
-| `--interval-hours` | `5` | Gap between scheduled uploads (hours) |
-| `--test-mode` | `false` | Upload only the first video |
+| `--manifest-file` | `outputs/render_manifest.json` | Input manifest from the clipping pipeline |
+| `--result-file` | `outputs/ig_upload_results.json` | Output JSON trace file |
+| `--updated-manifest` | `outputs/render_manifest_ig_uploaded.json` | Updated manifest with publish status |
+| `--tz-name` | `$APP_TIMEZONE` or `Asia/Makassar` | Timezone for the interval maths (IANA format) |
+| `--interval-hours` | `5` | Minimum gap between publishes (hours) |
+| `--test-mode` | `false` | Publish only the first pending item |
+| `--publish-now` | `false` | Ignore the interval and publish the whole batch back to back |
+
+See the [Instagram Reels Uploader wiki page](wiki/16-Instagram-Reels-Uploader.md) for the full publishing-flow details and rate limits.
 
 ## 🧹 Disk Cleanup
 
@@ -696,7 +720,7 @@ bash cleanup.sh
 
 Feel free for contributing, support, fork, likes, etc. Any feedback is greatly appreciated to keep this open-source project growing!
 
-- **Saweria:** [https://saweria.co/NaufalRizqullah17](https://saweria.co/NaufalRizqullah17)
+- **Saweria:** [https://saweria.co/pdrajan0x17](https://saweria.co/pdrajan0x17)
 - **Ko-fi:** [https://ko-fi.com/naufalrizqullah](https://ko-fi.com/naufalrizqullah)
 
 ## 📄 License

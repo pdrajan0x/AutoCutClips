@@ -266,7 +266,7 @@ def build_parser():
     )
 
     p.add_argument("--token-file", default=".credentials/youtube_token.json")
-    p.add_argument("--tz-name", default=DEFAULT_TZ)
+    p.add_argument("--tz-name", default=os.environ.get("APP_TIMEZONE", DEFAULT_TZ).strip() or DEFAULT_TZ)
     p.add_argument("--interval-hours", type=int, default=2)
     p.add_argument("--start-local", default=None,
                    help="Manual start time for the first slot (YYYY-MM-DD HH:MM)")

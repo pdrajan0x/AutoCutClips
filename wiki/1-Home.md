@@ -1,8 +1,8 @@
-# 🎬 OpenSource Clipping — Wiki
+# 🎬 AutoCutClips — Wiki
 
-Welcome to the **OpenSource Clipping** wiki! This is the central hub for all documentation related to the project.
+Welcome to the **AutoCutClips** wiki! This is the central hub for all documentation related to the project.
 
-**OpenSource Clipping** is an open-source AI-powered content factory that transforms long-form videos into cinematic short-form highlights with hook teasers, karaoke subtitles, and auto-thumbnails.
+**AutoCutClips** is an open-source AI-powered content factory that transforms long-form videos into cinematic short-form highlights with hook teasers, karaoke subtitles, and auto-thumbnails.
 
 ---
 
@@ -25,8 +25,9 @@ Welcome to the **OpenSource Clipping** wiki! This is the central hub for all doc
 | 13 | **[Troubleshooting & FAQ](Troubleshooting-and-FAQ)** | Common errors, fixes, and frequently asked questions |
 | 14 | **[Contributing](Contributing)** | How to contribute, report issues, and support the project |
 | 15 | **[YouTube API Setup Guide](YouTube-API-Setup-Guide)** | Step-by-step guide to create OAuth credentials for auto-upload |
-| 16 | **[Facebook Reels Uploader](Facebook-Reels-Uploader)** | Automated Reels uploader and scheduler for Facebook Pages |
+| 16 | **[Instagram Reels Uploader](Instagram-Reels-Uploader)** | Automated Reels publisher via the Instagram Graph API |
 | 17 | **[YouTube Tracker](YouTube-Tracker)** | Local playlist snapshot tracker for clipping source material |
+| — | **[CLI Arguments Reference](CLI-Arguments-Reference)** | Flat lookup table of every flag across all entry points |
 
 ---
 
@@ -62,6 +63,6 @@ Video URL → Download → Whisper Transcription → Gemini AI Analysis → Meta
 
 ## 🔗 Quick Links
 
-- [GitHub Repository](https://github.com/NaufalRizqullah/opensource-clipping)
-- [Changelog](https://github.com/NaufalRizqullah/opensource-clipping/blob/main/CHANGELOG.md)
-- [Story Clip Documentation](https://github.com/NaufalRizqullah/opensource-clipping/blob/main/docs/STORY_CLIP.md)
+- [GitHub Repository](https://github.com/pdrajan0x/AutoCutClips)
+- [Changelog](https://github.com/pdrajan0x/AutoCutClips/blob/main/CHANGELOG.md)
+- [Story Clip Documentation](https://github.com/pdrajan0x/AutoCutClips/blob/main/docs/STORY_CLIP.md)

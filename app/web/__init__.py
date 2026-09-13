@@ -1,1 +1,1 @@
-# web — OpenSource Clipping Web GUI
+# web — AutoCutClips Web GUI

@@ -1,6 +1,28 @@
 # ⚙️ CLI Reference
 
-Complete reference for all command-line arguments. Run `python main.py --help` for a quick overview.
+Complete reference for all command-line arguments. Run `python -m app.cli --help` for a quick overview (the `clipping` console script installed by `pyproject.toml` works the same way).
+
+---
+
+## Subcommands
+
+`python -m app.cli <subcommand> ...` dispatches to one of the following. If the
+first argument isn't a recognized subcommand, everything is forwarded to the
+clip/story pipeline (so the historical `--url ...` invocation still works).
+
+| Subcommand | Console script | What it does |
+|---|---|---|
+| `clip` (default) | `clipping` | Runs the auto-clip pipeline |
+| `story` | `clipping story` | Same pipeline, with `--story-mode` implied |
+| `upload-youtube` | `clipping-upload-youtube` | Uploads/schedules clips to YouTube |
+| `upload-instagram` | `clipping-upload-instagram` | Publishes clips as Instagram Reels |
+| `reschedule-youtube` | `clipping-reschedule-youtube` | Re-spaces already-scheduled YouTube videos |
+| `youtube-token` | `clipping-youtube-token` | Generates/verifies the YouTube OAuth token |
+
+This page covers the **clip/story pipeline** flags only. For the uploader and
+token subcommands see [YouTube Auto-Upload](YouTube-Auto-Upload), [Instagram
+Reels Uploader](Instagram-Reels-Uploader), and the
+[CLI Arguments Reference](CLI-Arguments-Reference).
 
 ---
 
@@ -10,6 +32,7 @@ Complete reference for all command-line arguments. Run `python main.py --help` f
 |---|---|---|
 | `--url`, `-u` | — | Video URL to process (**Required** unless `--story-mode`) |
 | `--source` | `youtube` | Video source platform: `youtube`, `tiktok`, `instagram`, `gdrive` |
+| `--tiktok` | — | **[Deprecated]** Use `--source tiktok` instead |
 | `--clips`, `-n` | `7` | Number of highlight clips to generate |
 | `--ratio`, `-r` | `9:16` | Output aspect ratio: `9:16`, `16:9`, `1:1`, `3:4`, `4:5` |
 | `--source-height` | `max` | Preferred source download max height (`max`, `1080`, `1440`, `2160`) |
@@ -76,6 +99,20 @@ Complete reference for all command-line arguments. Run `python main.py --help` f
 
 ---
 
+## AI Voice-Over Commentary (TTS)
+
+| Argument | Default | Description |
+|---|---|---|
+| `--voiceover` | `False` | Enable AI voice-over commentary mode (Gemini script + edge-tts) |
+| `--voiceover-voice` | `en-GB-MaisieNeural` | edge-tts voice name |
+| `--voiceover-lang` | `en` | Script language: `en` or `id` |
+| `--voiceover-style` | `analysis` | `analysis`, `reaction`, `lesson`, or `summary` |
+| `--voiceover-length` | `short` | `short` (~10s), `normal` (~30s), or `long` (~50s) |
+| `--voiceover-volume` | `1.0` | Volume of the voice-over track |
+| `--original-volume` | `0.15` | Volume of the original video audio while the voice-over plays |
+
+---
+
 ## Video Effects (Ambient Glow)
 
 | Argument | Default | Description |
@@ -104,12 +141,13 @@ Complete reference for all command-line arguments. Run `python main.py --help` f
 
 | Argument | Default | Description |
 |---|---|---|
-| `--split-screen` | `False` | Enable split-screen mode (9:16 only) |
+| `--split-screen` | `False` | Enable split-screen mode. Works with any vertical/square ratio (`9:16`, `1:1`, `3:4`, `4:5`) |
 | `--dynamic-split` | `False` | Auto-toggle between full and split based on speakers |
 | `--split-trigger` | `diarization` | Trigger: `diarization` (audio) or `face` (visual count) |
 | `--diarization-speakers` | `auto` | Number of speakers or `auto` for visual detection |
-| `--camera-switch` | `False` | Enable camera-switch mode (cinematic speaker switching) |
+| `--camera-switch` | `False` | Enable camera-switch mode (cinematic speaker switching). Works with any vertical/square ratio (`9:16`, `1:1`, `3:4`, `4:5`) |
 | `--switch-hold-duration` | `2.0` | Min seconds before switching speakers |
+| `--switch-blend-duration` | `0.0` | Transition duration when switching speakers (0 = instant snap, 0.2 = smooth blend) |
 | `--split-zoom` | `1.0` | Manual zoom factor for split panels |
 | `--split-v-align` | `0.5` | Vertical alignment (0.0=top, 0.5=center, 1.0=bottom) |
 | `--split-auto-zoom` | `False` | Auto-zoom to isolate each speaker |

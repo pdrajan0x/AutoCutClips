@@ -1,6 +1,6 @@
 # 📺 YouTube Tracker
 
-OpenSource Clipping includes a lightweight, local **YouTube Playlist Snapshot Tracker**. It helps you track which YouTube videos you've already used for clipping, ensuring you don't process duplicate content across different playlists or manual picks.
+AutoCutClips includes a lightweight, local **YouTube Playlist Snapshot Tracker**. It helps you track which YouTube videos you've already used for clipping, ensuring you don't process duplicate content across different playlists or manual picks.
 
 > **Snapshot Behavior:** This is a local tracker, not a live background sync. Data is only fetched from YouTube when you explicitly add a playlist or click the "Pull Again" button. All data is securely stored locally in a SQLite database.
 
@@ -18,7 +18,9 @@ OpenSource Clipping includes a lightweight, local **YouTube Playlist Snapshot Tr
 The tracker features a clean, dark-mode web dashboard. To launch it, run:
 
 ```bash
-python youtube_tracker/server.py
+python -m app.tracker.server
+# or, if installed as a console script:
+clipping-tracker
 ```
 
 Then, open **http://127.0.0.1:8765** in your browser.
@@ -59,7 +61,7 @@ Click the status pill or ✏️ button to edit. You can add extra metadata such 
 ### 5. Instant Clipping Command
 Ready to clip a video? Click the 📋 copy button on any video card to instantly copy the processing command:
 ```bash
-python main.py --url "https://www.youtube.com/watch?v=..."
+python -m app.cli --url "https://www.youtube.com/watch?v=..."
 ```
 *(You can configure your default preferred flags in the Settings panel)*
 
@@ -72,7 +74,7 @@ You can back up or export your tracking data from the Settings page:
 
 ## Database Schema Overview
 
-The SQLite database is located at `youtube_tracker/youtube_tracker.sqlite3`.
+The SQLite database is located at `app/tracker/youtube_tracker.sqlite3`.
 
 | Table | Purpose |
 |-------|---------|
@@ -85,4 +87,4 @@ The SQLite database is located at `youtube_tracker/youtube_tracker.sqlite3`.
 | `pull_run_videos` | The exact list of videos seen during a specific pull |
 | `settings` | Key-value store for UI settings and default flags |
 
-> **Resetting:** If you need to completely restart, you can delete `youtube_tracker/youtube_tracker.sqlite3`. A new empty database will be created the next time you start the server.
+> **Resetting:** If you need to completely restart, you can delete `app/tracker/youtube_tracker.sqlite3`. A new empty database will be created the next time you start the server.

@@ -365,7 +365,7 @@ class TrackerHandler(BaseHTTPRequestHandler):
             if not url:
                 return self._send_error_json(400, "URL is required")
 
-            from youtube_fetcher import extract_playlist_id
+            from .youtube_fetcher import extract_playlist_id
             pl_id = extract_playlist_id(url)
             if not pl_id:
                 return self._send_error_json(400, "Invalid playlist URL")
@@ -381,7 +381,7 @@ class TrackerHandler(BaseHTTPRequestHandler):
         # Refresh All Playlists
         m = re.match(r'^/api/sources/refresh_all$', path)
         if m:
-            sources = db.get_sources()
+            sources = db.get_sources_with_stats()
             for s in sources:
                 if s.get("source_type") == "playlist" and s.get("url"):
                     try:
@@ -393,7 +393,7 @@ class TrackerHandler(BaseHTTPRequestHandler):
         # Fast Refresh / Pull All Latest
         m = re.match(r'^/api/sources/refresh_all_latest$', path)
         if m:
-            sources = db.get_sources()
+            sources = db.get_sources_with_stats()
             for s in sources:
                 if s.get("source_type") == "playlist" and s.get("url"):
                     try:
@@ -446,7 +446,7 @@ class TrackerHandler(BaseHTTPRequestHandler):
             channel = db.get_channel(channel_id)
             if not channel or not channel.get("url"):
                 return self._send_error_json(404, "Channel not found or no URL")
-            from youtube_fetcher import fetch_channel_thumbnail
+            from .youtube_fetcher import fetch_channel_thumbnail
             t = fetch_channel_thumbnail(channel["url"])
             if t:
                 db.update_channel_thumbnail(channel_id, t)
@@ -459,7 +459,7 @@ class TrackerHandler(BaseHTTPRequestHandler):
             if not url:
                 return self._send_error_json(400, "URL is required")
 
-            from youtube_fetcher import extract_video_id as evi
+            from .youtube_fetcher import extract_video_id as evi
             vid_id = evi(url)
             if not vid_id:
                 return self._send_error_json(400, "Invalid video URL")

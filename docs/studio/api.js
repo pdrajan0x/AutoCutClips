@@ -1,5 +1,5 @@
 /**
- * OpenSource Clipping Studio — API Client
+ * AutoCutClips Studio — API Client
  * 
  * Shared module for all studio pages.
  * Backend URL is stored in localStorage and configurable via the Connect modal.

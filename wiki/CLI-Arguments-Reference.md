@@ -120,8 +120,8 @@ For narrative explanations of each feature, see the numbered pages in this wiki
 
 | Argument | Type / Default | Description |
 | --- | --- | --- |
-| `--split-screen` | flag, `False` | Split-screen mode for 2-speaker podcasts (9:16 only; needs `HF_TOKEN` for Pyannote). |
-| `--camera-switch` | flag, `False` | Camera-switch mode (9:16 only; needs `HF_TOKEN`). `--split-screen` wins if both are set. |
+| `--split-screen` | flag, `False` | Split-screen mode for 2+ speaker podcasts. Works on any vertical/square ratio (`9:16`, `1:1`, `3:4`, `4:5`); `--split-trigger diarization` needs `HF_TOKEN` for Pyannote, `--split-trigger face` does not. |
+| `--camera-switch` | flag, `False` | Camera-switch mode. Works on any vertical/square ratio (`9:16`, `1:1`, `3:4`, `4:5`); needs `HF_TOKEN`. `--split-screen` wins if both are set. |
 | `--diarization-speakers` | int or `auto`, default `auto` | Speaker count for diarization, or `auto` to detect visually. |
 | `--split-trigger` | `diarization` \| `face`, default `diarization` | What decides when to split: audio (who is talking) or video (how many faces). |
 | `--dynamic-split` | flag, `False` | Switch between full-screen (1 speaker) and split-screen (2 speakers) automatically. Needs `--split-screen`. |
