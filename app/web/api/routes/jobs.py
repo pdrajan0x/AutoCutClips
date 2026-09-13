@@ -74,11 +74,13 @@ async def create_job(req: JobCreateRequest) -> JobResponse:
             payload[key] = value.value
 
     reuse_job_id = payload.pop("reuse_job_id", None)
-    
-    # If reusing, automatically flag to load existing Gemini JSON (if not explicitly set otherwise)
-    if reuse_job_id and "load_gemini_json" not in payload:
-        payload["load_gemini_json"] = True
-        
+
+    # Reusing a job defaults to replaying its saved Gemini response, but an
+    # explicit choice from the UI wins (the field is None when unspecified).
+    if payload.get("load_gemini_json") is None:
+        payload["load_gemini_json"] = bool(reuse_job_id)
+
+
     job_id = store.create_job(
         url=req.url,
         upload_filename=req.upload_filename,

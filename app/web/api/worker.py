@@ -59,7 +59,6 @@ def _clip_details(job_id: str, render_manifest: list[dict]) -> list[ClipDetail]:
                 rank=entry.get("rank", 0),
                 viral_score=entry.get("viral_score"),
                 title=entry.get("title", ""),
-                title_en=entry.get("title", ""),
                 filename=filename,
                 duration=entry.get("duration"),
                 start_time=entry.get("start_time"),

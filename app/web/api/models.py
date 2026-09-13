@@ -113,6 +113,10 @@ class JobCreateRequest(BaseModel):
     ai_provider: AIProvider = AIProvider.GEMINI
     gemini_model: str = "gemini-3-flash-preview"
     face_detector: FaceDetector = FaceDetector.MEDIAPIPE
+    # Reuse the saved Gemini response for this job ID instead of calling the API.
+    # Left as None when the caller says nothing, so "reuse a job" can default it
+    # on while an explicit choice from the UI still wins.
+    load_gemini_json: Optional[bool] = None
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +142,6 @@ class ClipDetail(BaseModel):
     rank: int
     viral_score: Optional[int] = None
     title: Optional[str] = None
-    title_en: Optional[str] = None
     filename: str
     duration: Optional[float] = None
     start_time: Optional[float] = None

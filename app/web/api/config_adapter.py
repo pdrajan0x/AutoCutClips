@@ -198,7 +198,8 @@ def build_config_from_payload(
         nvidia_model=payload.get("nvidia_model", "deepseek-ai/deepseek-v4-pro"),
         gemini_model=payload.get("gemini_model", "gemini-3-flash-preview"),
         gemini_fallback_model=payload.get("gemini_fallback_model", GEMINI_FALLBACK_MODEL),
-        load_gemini_json=payload.get("load_gemini_json", False),
+        # Tri-state on the API model (None = unspecified); the pipeline wants a bool.
+        load_gemini_json=bool(payload.get("load_gemini_json")),
         # Tracking Tuning (use defaults for web GUI)
         track_step=None,
         track_deadzone=None,

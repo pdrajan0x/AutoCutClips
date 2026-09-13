@@ -25,6 +25,8 @@ from .routes import files, jobs, settings
 async def lifespan(app: FastAPI):
     """Application startup/shutdown lifecycle."""
     print("🚀 AutoCutClips Studio — backend starting...")
+    # Printed so a browser blocked by CORS can be diagnosed from the server log.
+    print(f"   Allowed origins: {', '.join(ALLOWED_ORIGINS)}")
     yield
     print("👋 Backend shutting down...")
 
@@ -36,18 +38,32 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow the frontend dev servers and the published dashboard.
+# CORS — the local Vite dev servers plus the published GitHub Pages dashboard.
+#
+# The Pages origin depends on who forked the repo, so it is configurable rather
+# than hardcoded: set STUDIO_ALLOWED_ORIGINS to a comma-separated list to add
+# your own (e.g. "https://<user>.github.io"). The defaults below cover a local
+# checkout and this repo's own Pages site.
+DEFAULT_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:5175",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
+    "http://127.0.0.1:5175",
+    "https://pdrajan0x.github.io",
+]
+
+_extra_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.environ.get("STUDIO_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+ALLOWED_ORIGINS = DEFAULT_ALLOWED_ORIGINS + _extra_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://localhost:5175",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:5174",
-        "http://127.0.0.1:5175",
-        "https://naufalrizqullah.github.io",
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
