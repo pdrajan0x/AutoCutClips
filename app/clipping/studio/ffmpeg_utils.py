@@ -336,7 +336,8 @@ def run_ffmpeg_with_progress(ffmpeg_cmd, total_duration, label="Render"):
             except ValueError:
                 pass
 
-    progress.close()
     return_code = process.wait()
+    # Only snap the bar to 100% if ffmpeg actually finished the encode.
+    progress.close(complete=return_code == 0)
     return return_code, error_lines[-20:]
 

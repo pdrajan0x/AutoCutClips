@@ -4,6 +4,9 @@ clipping.engine.download — Source video download (yt-dlp / gdown).
 
 import os
 import re
+import sys
+
+from ..progress import render_bar
 
 PLATFORM_LABELS = {
     "youtube": "YouTube",
@@ -94,8 +97,7 @@ def _ydl_progress_hook(d: dict) -> None:
 
     if total:
         pct = downloaded / total * 100
-        filled = int(20 * downloaded / total)
-        bar = "█" * filled + " " * (20 - filled)
+        bar = render_bar(downloaded / total, 20, sys.stdout)
         print(
             f"\r      Download: {pct:3.0f}%|{bar}| "
             f"{downloaded / 1048576:.0f}/{total / 1048576:.0f}MB {spd} ETA {eta_s}   ",
