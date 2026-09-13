@@ -280,10 +280,30 @@ async function testAndConnect() {
   const btn = document.getElementById('connect-test-btn');
   const url = input.value.trim();
 
-  if (!url) {
+  const fail = (text) => {
     msg.className = 'text-sm mb-4 text-red-500';
-    msg.textContent = '⚠️ Please enter a URL';
+    msg.textContent = text;
     msg.classList.remove('hidden');
+  };
+
+  if (!url) {
+    fail('⚠️ Please enter a URL');
+    return;
+  }
+
+  // Without a scheme the browser resolves the value against this page and
+  // returns a bewildering 404. The common mistake is pasting the ngrok
+  // authtoken instead of the tunnel URL the notebook prints, so say so.
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    fail('❌ That is not a URL. Paste the tunnel URL the notebook prints '
+       + '(e.g. https://xxxx.ngrok-free.app) — not your ngrok authtoken.');
+    return;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    fail('❌ The URL must start with https:// (or http:// for a local backend).');
     return;
   }
 
