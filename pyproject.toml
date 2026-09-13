@@ -1,0 +1,40 @@
+[project]
+name = "opensource-clipping"
+version = "1.12.0"
+description = "AI Auto-Clipper & Teaser Generator — converts long videos into viral short-form clips"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "yt-dlp[default]",
+    "faster-whisper",
+    "google-genai",
+    "mediapipe",
+    "opencv-python",
+    "Pillow",
+    "requests",
+    "python-dotenv",
+    "google-api-python-client",
+    "google-auth",
+    "google-auth-oauthlib",
+    "google-auth-httplib2",
+    "ultralytics",
+    "gdown",
+]
+
+[project.scripts]
+clipping = "app.cli:main"
+clipping-upload-youtube = "app.cli:upload_youtube"
+clipping-upload-instagram = "app.cli:upload_instagram"
+clipping-reschedule-youtube = "app.cli:reschedule_youtube"
+clipping-youtube-token = "app.cli:youtube_token"
+clipping-tracker = "app.tracker.server:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.tracker" = ["static/*"]
