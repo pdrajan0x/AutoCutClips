@@ -49,6 +49,8 @@ Reels Uploader](Instagram-Reels-Uploader), and the
 | `--gemini-fallback-model` | `gemini-2.5-flash` | Fallback model if main model fails |
 | `--nvidia-model` | `deepseek-ai/deepseek-v4-pro` | Model name for NVIDIA NIM API |
 | `--load-gemini-json` | `False` | Load saved `gemini_response.json` to bypass AI call |
+| `--target-accounts` | `target_accounts.json` | Path to the account-routing config used to classify each clip. Falls back to built-in defaults if the file is missing |
+| `--no-account-routing` | `False` | Skip account classification entirely, so the AI focuses on clip selection and metadata |
 
 ---
 

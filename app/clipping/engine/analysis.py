@@ -9,7 +9,7 @@ import json
 import re
 import time
 
-from .prompt import TARGET_ACCOUNTS, get_analysis_prompt
+from .prompt import get_analysis_prompt, load_target_accounts
 
 # ==============================================================================
 # RETRY CONFIG
@@ -102,38 +102,35 @@ def _generate_json_with_retry(client, model, fallback_model, contents, config):
 # RESPONSE SCHEMAS
 # ==============================================================================
 
-def _nvidia_schema() -> dict:
-    """JSON Schema for NVIDIA NIM guided_json (lowercase type names)."""
-    obj = lambda props, required: {  # noqa: E731 - compact local builder
-        "type": "object",
-        "additionalProperties": False,
-        "properties": props,
-        "required": required,
-    }
-    num, integer, text = {"type": "number"}, {"type": "integer"}, {"type": "string"}
-    account_types = list(TARGET_ACCOUNTS.keys())
+def _build_clip_schema(cfg, *, uppercase: bool) -> dict:
+    """
+    Build the structured-output schema for one clip list.
 
-    classification = obj(
-        {
-            "tipe_akun": {"type": "string", "enum": account_types},
-            "akun_tujuan": text,
-            "confidence": integer,
-            "angle_utama": text,
-            "alasan": text,
-            "kata_kunci_pendukung": {"type": "array", "items": text},
-            "bio_akun": text,
-            "alternatif_akun": obj(
-                {
-                    "tipe_akun": {"type": "string", "enum": account_types},
-                    "akun_tujuan": text,
-                    "alasan": text,
-                },
-                ["tipe_akun", "akun_tujuan", "alasan"],
-            ),
-        },
-        ["tipe_akun", "akun_tujuan", "confidence", "angle_utama", "alasan",
-         "kata_kunci_pendukung", "bio_akun", "alternatif_akun"],
-    )
+    Gemini wants uppercase type names ("STRING"), NVIDIA NIM wants lowercase
+    ("string"); everything else is identical, so both providers share this
+    builder to stop the two schemas drifting apart.
+    """
+    def t(name):
+        return {"type": name.upper() if uppercase else name.lower()}
+
+    num, integer, text, boolean = t("number"), t("integer"), t("string"), t("boolean")
+
+    def obj(props, required):
+        schema = {
+            "type": "OBJECT" if uppercase else "object",
+            "properties": props,
+            "required": required,
+        }
+        if not uppercase:
+            schema["additionalProperties"] = False
+        return schema
+
+    def array(items):
+        return {"type": "ARRAY" if uppercase else "array", "items": items}
+
+    def enum(values):
+        # Gemini's schema dialect is stricter about enum, so only NVIDIA gets it.
+        return dict(text, enum=values) if not uppercase else text
 
     clip_properties = {
         "rank": integer,
@@ -142,163 +139,96 @@ def _nvidia_schema() -> dict:
         "end_time": num,
         "hook_start_time": num,
         "hook_end_time": num,
-        "bgm_mood": {"type": "string", "enum": ["chill", "epic", "sad", "upbeat", "suspense"]},
-        "typography_plan": {
-            "type": "array",
-            "items": obj(
+        "hook_text": text,
+        "bgm_mood": enum(["chill", "epic", "sad", "upbeat", "suspense"]),
+        "typography_plan": array(
+            obj(
                 {
-                    "kata_utama": text,
-                    "scale_level": {"type": "integer", "enum": [1, 2, 3]},
-                    "style": {"type": "string", "enum": ["utama", "khusus"]},
-                    "animasi": {"type": "string", "enum": ["bounce_pop", "stagger_up"]},
+                    "word": text,
+                    "scale_level": integer,
+                    "style": enum(["main", "accent"]),
+                    "animation": enum(["bounce_pop", "stagger_up"]),
                 },
-                ["kata_utama", "scale_level", "style", "animasi"],
-            ),
-        },
-        "broll_list": {
-            "type": "array",
-            "items": obj(
+                ["word", "scale_level", "style", "animation"],
+            )
+        ),
+        "broll_list": array(
+            obj(
                 {"start_time": num, "end_time": num, "search_query": text},
                 ["start_time", "end_time", "search_query"],
-            ),
-        },
-        "recommended_visual_broll_hook": {
-            "type": "array",
-            "items": obj(
+            )
+        ),
+        "recommended_visual_broll_hook": array(
+            obj(
                 {"broll_idea": text, "search_keyword": text, "why_it_works": text},
                 ["broll_idea", "search_keyword", "why_it_works"],
-            ),
-        },
-        "title_indonesia": text,
-        "title_inggris": text,
-        "hastag": text,
+            )
+        ),
+        "title": text,
+        "hashtags": text,
         "description_hook": text,
         "description_context": text,
-        "keyword_tags": {"type": "array", "items": text},
-        "tiktok_title_id": text,
-        "tiktok_caption_id": text,
-        "tiktok_caption": text,
-        "alasan": text,
-        "klasifikasi_akun": classification,
-        "hook_v2": obj(
+        "keyword_tags": array(text),
+        "reason": text,
+    }
+
+    # Only ask for the optional blocks when the prompt actually requested them —
+    # requiring them unconditionally wastes tokens and degrades clip quality.
+    if cfg is not None and getattr(cfg, "hook_v2", False):
+        clip_properties["hook_v2"] = obj(
             {
-                "enabled": {"type": "boolean"},
-                "items": {
-                    "type": "array",
-                    "items": obj(
+                "enabled": boolean,
+                "items": array(
+                    obj(
                         {"start_time": num, "end_time": num, "text": text},
                         ["start_time", "end_time", "text"],
-                    ),
-                },
+                    )
+                ),
                 "transition": obj(
-                    {"type": {"type": "string", "enum": ["white_flash", "glitch"]}},
-                    ["type"],
+                    {"type": enum(["white_flash", "glitch"])}, ["type"]
                 ),
             },
             ["enabled", "items", "transition"],
-        ),
-        "keep_segments": {
-            "type": "array",
-            "items": obj({"start_time": num, "end_time": num}, ["start_time", "end_time"]),
-        },
-    }
+        )
 
-    return {"type": "array", "items": obj(clip_properties, list(clip_properties))}
+    if not (cfg is None or getattr(cfg, "no_segment_trim", False)):
+        clip_properties["keep_segments"] = array(
+            obj({"start_time": num, "end_time": num}, ["start_time", "end_time"])
+        )
 
-
-def _gemini_schema() -> dict:
-    """response_schema for the Gemini structured-output API (uppercase type names)."""
-    obj = lambda props, required: {  # noqa: E731 - compact local builder
-        "type": "OBJECT",
-        "properties": props,
-        "required": required,
-    }
-    num, integer, text = {"type": "NUMBER"}, {"type": "INTEGER"}, {"type": "STRING"}
-
-    classification = obj(
-        {
-            "tipe_akun": text,
-            "akun_tujuan": text,
-            "confidence": integer,
-            "angle_utama": text,
-            "alasan": text,
-            "kata_kunci_pendukung": {"type": "ARRAY", "items": text},
-            "bio_akun": text,
-            "alternatif_akun": obj(
-                {"tipe_akun": text, "akun_tujuan": text, "alasan": text},
-                ["tipe_akun", "akun_tujuan", "alasan"],
-            ),
-        },
-        ["tipe_akun", "akun_tujuan", "confidence", "angle_utama", "alasan",
-         "kata_kunci_pendukung", "bio_akun", "alternatif_akun"],
-    )
-
-    clip_properties = {
-        "rank": integer,
-        "viral_score": integer,
-        "hook_start_time": num,
-        "hook_end_time": num,
-        "start_time": num,
-        "end_time": num,
-        "typography_plan": {
-            "type": "ARRAY",
-            "items": obj(
-                {
-                    "kata_utama": text,
-                    "scale_level": integer,
-                    "style": text,
-                    "animasi": text,
-                },
-                ["kata_utama", "scale_level", "style", "animasi"],
-            ),
-        },
-        "broll_list": {
-            "type": "ARRAY",
-            "items": obj(
-                {"start_time": num, "end_time": num, "search_query": text},
-                ["start_time", "end_time", "search_query"],
-            ),
-        },
-        "recommended_visual_broll_hook": {
-            "type": "ARRAY",
-            "items": obj(
-                {"broll_idea": text, "search_keyword": text, "why_it_works": text},
-                ["broll_idea", "search_keyword", "why_it_works"],
-            ),
-        },
-        "alasan": text,
-        "bgm_mood": text,
-        "title_indonesia": text,
-        "title_inggris": text,
-        "hastag": text,
-        "description_hook": text,
-        "description_context": text,
-        "keyword_tags": {"type": "ARRAY", "items": text},
-        "tiktok_title_id": text,
-        "tiktok_caption_id": text,
-        "tiktok_caption": text,
-        "klasifikasi_akun": classification,
-        "hook_v2": obj(
+    accounts = load_target_accounts(cfg)
+    if accounts:
+        account_types = list(accounts)
+        clip_properties["account_classification"] = obj(
             {
-                "enabled": {"type": "BOOLEAN"},
-                "items": {
-                    "type": "ARRAY",
-                    "items": obj(
-                        {"start_time": num, "end_time": num, "text": text},
-                        ["start_time", "end_time", "text"],
-                    ),
-                },
-                "transition": obj({"type": text}, ["type"]),
+                "account_type": enum(account_types),
+                "target_account": text,
+                "confidence": integer,
+                "main_angle": text,
+                "reason": text,
+                "supporting_keywords": array(text),
+                "account_bio": text,
+                "alternative_account": obj(
+                    {
+                        "account_type": enum(account_types),
+                        "target_account": text,
+                        "reason": text,
+                    },
+                    ["account_type", "target_account", "reason"],
+                ),
             },
-            ["enabled", "items", "transition"],
-        ),
-        "keep_segments": {
-            "type": "ARRAY",
-            "items": obj({"start_time": num, "end_time": num}, ["start_time", "end_time"]),
-        },
+            [
+                "account_type", "target_account", "confidence", "main_angle",
+                "reason", "supporting_keywords", "account_bio",
+                "alternative_account",
+            ],
+        )
+
+    return {
+        "type": "ARRAY" if uppercase else "array",
+        "items": obj(clip_properties, list(clip_properties)),
     }
 
-    return {"type": "ARRAY", "items": obj(clip_properties, list(clip_properties))}
 
 
 # ==============================================================================
@@ -322,7 +252,7 @@ def analyze_with_nvidia(transcript: str, cfg) -> list[dict]:
     """Analyse the transcript with the NVIDIA NIM API (OpenAI-compatible)."""
     from openai import OpenAI
 
-    print(f"[3/3] Analysing the top {cfg.jumlah_clip} moments with NVIDIA ({cfg.nvidia_model})...")
+    print(f"[3/3] Analysing the top {cfg.clip_count} moments with NVIDIA ({cfg.nvidia_model})...")
 
     if not cfg.api_key_nvidia:
         raise ValueError("NVIDIA_API_KEY not found in the environment.")
@@ -332,7 +262,7 @@ def analyze_with_nvidia(transcript: str, cfg) -> list[dict]:
         api_key=cfg.api_key_nvidia,
     )
 
-    prompt = get_analysis_prompt(transcript, cfg.jumlah_clip, cfg.durasi_hook, cfg=cfg)
+    prompt = get_analysis_prompt(transcript, cfg.clip_count, cfg.hook_duration, cfg=cfg)
 
     completion = client.chat.completions.create(
         model=cfg.nvidia_model,
@@ -351,7 +281,7 @@ def analyze_with_nvidia(transcript: str, cfg) -> list[dict]:
         max_tokens=16384,
         extra_body={
             "chat_template_kwargs": {"thinking": False},
-            "nvext": {"guided_json": _nvidia_schema()},
+            "nvext": {"guided_json": _build_clip_schema(cfg, uppercase=False)},
         },
     )
 
@@ -368,9 +298,9 @@ def analyze_with_gemini(transcript: str, cfg) -> list[dict]:
     import google.genai as genai
     from google.genai import types
 
-    print(f"[3/3] Analysing the top {cfg.jumlah_clip} moments with Gemini...")
+    print(f"[3/3] Analysing the top {cfg.clip_count} moments with Gemini...")
 
-    prompt = get_analysis_prompt(transcript, cfg.jumlah_clip, cfg.durasi_hook, cfg=cfg)
+    prompt = get_analysis_prompt(transcript, cfg.clip_count, cfg.hook_duration, cfg=cfg)
 
     client = genai.Client(
         api_key=cfg.api_key_gemini,
@@ -382,7 +312,7 @@ def analyze_with_gemini(transcript: str, cfg) -> list[dict]:
 
     gemini_config = types.GenerateContentConfig(
         response_mime_type="application/json",
-        response_schema=_gemini_schema(),
+        response_schema=_build_clip_schema(cfg, uppercase=True),
     )
 
     return _generate_json_with_retry(

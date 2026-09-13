@@ -50,7 +50,7 @@ def render_hybrid_video(
         broll_data = []
 
     # =======================================================
-    # 🎛️ PARAMETER TUNING KAMERA
+    # 🎛️ CAMERA TUNING PARAMETERS
     # =======================================================
     STEP_DETECTION     = cfg.track_step if cfg.track_step is not None else 0.25   # the AI checks for faces every 0.25 s
     # STEP_DETECTION     = 0.5   # the AI checks for faces every 0.5 s
@@ -60,15 +60,17 @@ def render_hybrid_video(
     # DEADZONE_RATIO   = 0.25  # the middle 25% is the safe zone
     # DEADZONE_RATIO   = 0.20  # [OLD] the middle 20% was the safe zone
 
-    SMOOTH_FACTOR    = cfg.track_smooth if cfg.track_smooth is not None else 0.30  # Kecepatan kamera menyusul (30% jarak). Bikin pergerakan sangat mulus.
-    # SMOOTH_FACTOR    = 0.15  # Kecepatan kamera menyusul (15% jarak). Bikin pergerakan sangat mulus.
-    # SMOOTH_FACTOR    = 0.10  # [NEW; NOT USED]Kecepatan kamera menyusul (10% jarak). Bikin pergerakan sangat mulus.
+    SMOOTH_FACTOR    = cfg.track_smooth if cfg.track_smooth is not None else 0.30  # How fast the camera catches up (30% of the distance). Makes the motion very smooth.
+    # SMOOTH_FACTOR    = 0.15  # How fast the camera catches up (15% of the distance). Makes the motion very smooth.
+    # SMOOTH_FACTOR    = 0.10  # [NEW; NOT USED] How fast the camera catches up (10% of the distance). Makes the motion very smooth.
 
-    JITTER_THRESHOLD = cfg.track_jitter if cfg.track_jitter is not None else 5     # Abaikan pergeseran di bawah 5 pixel (Anti-getar/Micro-jitter)
-    # JITTER_THRESHOLD = 4     # [OLD] Abaikan pergeseran di bawah 4 pixel (Anti-getar/Micro-jitter)
+    JITTER_THRESHOLD = cfg.track_jitter if cfg.track_jitter is not None else 5     # Ignore shifts smaller than 5 pixels (anti-shake / micro-jitter)
+    # JITTER_THRESHOLD = 4     # [OLD] Ignore shifts smaller than 4 pixels (anti-shake / micro-jitter)
 
-    SNAP_THRESHOLD   = cfg.track_snap if cfg.track_snap is not None else 0.25  # a face jumping > 25% of the screen width counts as a new person (hard cut)
-    # SNAP_THRESHOLD   = 0.30  # [NEW; NOT USED] jump > 30% of the width = new person
+    # A face jumping further than this fraction of the screen width counts as a
+    # new person (hard cut). Standard clips default to aggressive snapping so
+    # wide-to-tight camera cuts land hard; --track-snap overrides it.
+    SNAP_THRESHOLD   = cfg.track_snap if cfg.track_snap is not None else 0.08
     # =======================================================
 
     video_encoder = detect_video_encoder(cfg)
@@ -77,7 +79,7 @@ def render_hybrid_video(
     detector = None
     if cfg.face_detector == "yolo":
         if not os.path.exists(cfg.file_yolo_model):
-            print(f"   📥 Mendownload YOLOv8 Face Model ({cfg.yolo_size})...")
+            print(f"   📥 Downloading the YOLOv8 face model ({cfg.yolo_size})...")
             import urllib.request
 
             urllib.request.urlretrieve(cfg.url_yolo_model, cfg.file_yolo_model)
@@ -189,7 +191,7 @@ def render_hybrid_video(
 
         current_time += STEP_DETECTION
 
-    # FASE 2: SMOOTH CAMERA
+    # PHASE 2: SMOOTH CAMERA
     smooth_data = []
     if raw_data:
         import statistics as _st
@@ -200,9 +202,7 @@ def render_hybrid_video(
         
         deadzone_px = crop_w * DEADZONE_RATIO
         
-        # Consistent aggressive snapping for wide-to-tight camera cuts in standard clips
-        temp_snap = SNAP_THRESHOLD if SNAP_THRESHOLD < 0.1 else 0.08
-        snap_px = width * temp_snap
+        snap_px = width * SNAP_THRESHOLD
 
         for d in raw_data:
             face_cx = d["cx"]
@@ -275,7 +275,7 @@ def render_hybrid_video(
         secs = int(s % 60)
         return f"{mins:02d}:{secs:02d}"
 
-    # FASE 3: RENDER FRAME
+    # PHASE 3: RENDER FRAME
     base_out_w, base_out_h = _get_render_dims(cfg, ratio, source_h=height)
     
     # DEV MODE: Force 16:9 to show context or 2648 ultrawide for merge
@@ -355,7 +355,7 @@ def render_hybrid_video(
                         frame_normal[:, x_off : x_off + fit_w] = resized
 
             # Base target for filtering (e.g. B-Roll applies to the normal output)
-            frame_terpilih = frame_normal
+            selected_frame = frame_normal
 
             # --- 2. CREATE DEV CONTEXT FRAME IF ACTIVE ---
             frame_dev = None
@@ -430,18 +430,18 @@ def render_hybrid_video(
                             alpha = (bc["end"] - absolute_time) / TRANSITION_DUR
 
                         if alpha >= 1.0:
-                            frame_terpilih = frame_b_zoomed
+                            selected_frame = frame_b_zoomed
                         else:
-                            frame_terpilih = cv2.addWeighted(frame_b_zoomed, alpha, frame_terpilih, 1.0 - alpha, 0)
+                            selected_frame = cv2.addWeighted(frame_b_zoomed, alpha, selected_frame, 1.0 - alpha, 0)
                     break
 
             # --- 4. WATERMARK OVERLAY ---
             if getattr(cfg, "watermark_enabled", False):
-                frame_terpilih = apply_watermark(frame_terpilih, cfg)
+                selected_frame = apply_watermark(selected_frame, cfg)
 
             # --- 5. OUTPUT WRITING AND MERGING ---
             if merge_output:
-                frm_normal_small = _resize_frame(frame_terpilih, (608, 1080))
+                frm_normal_small = _resize_frame(selected_frame, (608, 1080))
                 frm_merged = np.full((1220, 2648, 3), 30, dtype=np.uint8)
                 
                 cv2.putText(frm_merged, "DIRECTOR'S CONSOLE (16:9 RAW)", (40, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
@@ -457,7 +457,7 @@ def render_hybrid_video(
             elif dev_visualize:
                 writer.stdin.write(frame_dev.tobytes())
             else:
-                writer.stdin.write(frame_terpilih.tobytes())
+                writer.stdin.write(selected_frame.tobytes())
             frame_count += 1
 
             render_percent = (

@@ -12,7 +12,7 @@ find uploads -type f -delete
 # 2. Membersihkan file sementara di dalam folder outputs/
 echo "🗑️  Menghapus video sumber (raw) dan file audio sementara di dalam outputs/..."
 # Ini akan menyisakan final klip (.mp4 hasil render) dan histori JSON
-find outputs -type f -name "video_asli.mp4" -delete
+find outputs -type f -name "source_video.mp4" -delete
 find outputs -type f -name "*_audio.wav" -delete
 find outputs -type f -name "*.json3" -delete
 

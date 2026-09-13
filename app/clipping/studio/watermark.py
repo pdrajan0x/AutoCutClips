@@ -37,7 +37,7 @@ DEFAULT_FONT_SIZE = 0  # 0 = auto (3% of frame height)
 
 def validate_watermark_config(cfg):
     """
-    Validasi parameter watermark di config.
+    Validate the watermark parameters in the config.
     Raises ValueError when any value is invalid.
     """
     if not getattr(cfg, "watermark_enabled", False):
@@ -48,8 +48,8 @@ def validate_watermark_config(cfg):
 
     if not wm_text and not wm_image:
         raise ValueError(
-            "❌ --watermark membutuhkan --text atau --image. "
-            "Contoh: --watermark --text \"Nama Watermark\""
+            "❌ --watermark requires --text or --image. "
+            "Example: --watermark --text \"Watermark Name\""
         )
 
     opacity = getattr(cfg, "watermark_opacity", DEFAULT_OPACITY)
@@ -62,7 +62,7 @@ def validate_watermark_config(cfg):
     if position not in VALID_POSITIONS:
         raise ValueError(
             f"❌ --position '{position}' is not valid. "
-            f"Pilihan: {', '.join(VALID_POSITIONS)}"
+            f"Choices: {', '.join(VALID_POSITIONS)}"
         )
 
     padding = getattr(cfg, "watermark_padding", DEFAULT_PADDING)
@@ -116,8 +116,8 @@ class WatermarkRenderer(ABC):
         Padding is applied from the nearest edge for that position:
         - top-left     -> padding from the top and the left
         - center-right -> padding from the right, vertically centred
-        - center       → padding diabaikan, tepat di tengah
-        - dst.
+        - center       → padding ignored, placed exactly in the middle
+        - etc.
 
         Returns:
             tuple[int, int]: the (x, y) of the watermark's top-left corner.
@@ -145,7 +145,7 @@ class WatermarkRenderer(ABC):
     @abstractmethod
     def render(self, frame):
         """
-        Apply watermark ke frame OpenCV (BGR).
+        Apply the watermark to an OpenCV (BGR) frame.
 
         Args:
             frame: a BGR numpy array from OpenCV.
@@ -157,7 +157,7 @@ class WatermarkRenderer(ABC):
 
 
 # ==============================================================================
-# TEXT WATERMARK (Fase 1)
+# TEXT WATERMARK (Phase 1)
 # ==============================================================================
 
 
@@ -179,7 +179,7 @@ class TextWatermarkRenderer(WatermarkRenderer):
         font_dir = getattr(cfg, "font_dir", os.path.join(base_dir, "custom_fonts"))
 
         self._font_path = None
-        # Prioritas: Montserrat-Black > Montserrat-Regular > fallback
+        # Priority: Montserrat-Black > Montserrat-Regular > fallback
         for font_file in ["Montserrat-Black.ttf", "Montserrat-Regular.ttf"]:
             candidate = os.path.join(font_dir, font_file)
             if os.path.exists(candidate):
@@ -206,7 +206,7 @@ class TextWatermarkRenderer(WatermarkRenderer):
         return max(16, int(frame_h * 0.03))
 
     def render(self, frame):
-        """Apply text watermark ke frame BGR."""
+        """Apply the text watermark to a BGR frame."""
         if not self.text:
             return frame
 
@@ -227,7 +227,7 @@ class TextWatermarkRenderer(WatermarkRenderer):
             text_w = bbox[2] - bbox[0]
             text_h = bbox[3] - bbox[1]
 
-            # Tambah sedikit margin internal
+            # Add a small internal margin
             margin = max(4, font_size // 8)
             wm_w = text_w + margin * 2
             wm_h = text_h + margin * 2
@@ -235,7 +235,7 @@ class TextWatermarkRenderer(WatermarkRenderer):
             # Compute the position.
             x, y = self._calculate_position(frame_w, frame_h, wm_w, wm_h)
 
-            # Render text ke RGBA overlay
+            # Render the text into an RGBA overlay
             overlay_rgba = Image.new("RGBA", (wm_w, wm_h), (0, 0, 0, 0))
             overlay_draw = ImageDraw.Draw(overlay_rgba)
 
@@ -258,7 +258,7 @@ class TextWatermarkRenderer(WatermarkRenderer):
 
             self._overlay_cache[cache_key] = (overlay_rgba, x, y)
 
-        # Alpha blend overlay ke frame
+        # Alpha blend the overlay onto the frame
         wm_w, wm_h = overlay_rgba.size
 
         # Clamp so the overlay stays inside the frame.
@@ -270,7 +270,7 @@ class TextWatermarkRenderer(WatermarkRenderer):
         if actual_w <= 0 or actual_h <= 0:
             return frame
 
-        # Convert region frame ke PIL RGBA
+        # Convert the frame region to a PIL RGBA image
         region = frame[y:y2, x:x2]
         region_pil = Image.fromarray(cv2.cvtColor(region, cv2.COLOR_BGR2RGBA))
 
@@ -279,7 +279,7 @@ class TextWatermarkRenderer(WatermarkRenderer):
 
         # Apply opacity
         if self.opacity < 1.0:
-            # Skala alpha channel sesuai opacity
+            # Scale the alpha channel to match the opacity
             r, g, b, a = overlay_crop.split()
             a = a.point(lambda p: int(p * self.opacity))
             overlay_crop = Image.merge("RGBA", (r, g, b, a))
@@ -287,7 +287,7 @@ class TextWatermarkRenderer(WatermarkRenderer):
         # Composite
         region_pil = Image.alpha_composite(region_pil, overlay_crop)
 
-        # Convert balik ke BGR dan tulis ke frame
+        # Convert back to BGR and write it into the frame
         result_bgr = cv2.cvtColor(np.array(region_pil), cv2.COLOR_RGBA2BGR)
         frame[y:y2, x:x2] = result_bgr
 
@@ -295,15 +295,15 @@ class TextWatermarkRenderer(WatermarkRenderer):
 
 
 # ==============================================================================
-# IMAGE WATERMARK (Fase 2)
+# IMAGE WATERMARK (Phase 2)
 # ==============================================================================
 
 
 class ImageWatermarkRenderer(WatermarkRenderer):
     """
-    Render watermark gambar (PNG, JPG, JPEG, WEBP, dll).
+    Renders an image watermark (PNG, JPG, JPEG, WEBP, etc.).
 
-    Fitur:
+    Features:
     - Loads the watermark image and converts it to RGBA (PNG transparency works).
     - Auto-scales it from --watermark-scale (a percentage of the frame height).
     - Alpha-composites it at the configured opacity.
@@ -332,7 +332,7 @@ class ImageWatermarkRenderer(WatermarkRenderer):
     def _scale_image(self, source_rgba, target_h):
         """
         Scale the watermark image so its height is scale_pct% of the frame height.
-        Mempertahankan aspect ratio asli gambar.
+        Preserves the image's original aspect ratio.
 
         Args:
             source_rgba: PIL Image RGBA source.
@@ -355,7 +355,7 @@ class ImageWatermarkRenderer(WatermarkRenderer):
         )
 
     def render(self, frame):
-        """Apply image watermark ke frame BGR."""
+        """Apply the image watermark to a BGR frame."""
         if self._source_rgba is None:
             return frame
 
@@ -366,16 +366,16 @@ class ImageWatermarkRenderer(WatermarkRenderer):
         if cache_key in self._overlay_cache:
             scaled_rgba, x, y = self._overlay_cache[cache_key]
         else:
-            # Scale image sesuai frame
+            # Scale the image to fit the frame
             scaled_rgba = self._scale_image(self._source_rgba, frame_h)
             wm_w, wm_h = scaled_rgba.size
 
-            # Compute the position. menggunakan base class
+            # Compute the position using the base class helper
             x, y = self._calculate_position(frame_w, frame_h, wm_w, wm_h)
 
             self._overlay_cache[cache_key] = (scaled_rgba, x, y)
 
-        # Alpha blend overlay ke frame
+        # Alpha blend the overlay onto the frame
         wm_w, wm_h = scaled_rgba.size
 
         # Clamp so the overlay stays inside the frame.
@@ -387,14 +387,14 @@ class ImageWatermarkRenderer(WatermarkRenderer):
         if actual_w <= 0 or actual_h <= 0:
             return frame
 
-        # Convert region frame ke PIL RGBA
+        # Convert the frame region to a PIL RGBA image
         region = frame[y:y2, x:x2]
         region_pil = Image.fromarray(cv2.cvtColor(region, cv2.COLOR_BGR2RGBA))
 
         # Crop the overlay where it runs past the edge.
         overlay_crop = scaled_rgba.crop((0, 0, actual_w, actual_h))
 
-        # Apply opacity ke alpha channel
+        # Apply the opacity to the alpha channel
         if self.opacity < 1.0:
             r, g, b, a = overlay_crop.split()
             a = a.point(lambda p: int(p * self.opacity))
@@ -403,7 +403,7 @@ class ImageWatermarkRenderer(WatermarkRenderer):
         # Composite
         region_pil = Image.alpha_composite(region_pil, overlay_crop)
 
-        # Convert balik ke BGR dan tulis ke frame
+        # Convert back to BGR and write it into the frame
         result_bgr = cv2.cvtColor(np.array(region_pil), cv2.COLOR_RGBA2BGR)
         frame[y:y2, x:x2] = result_bgr
 
@@ -442,7 +442,7 @@ _renderer_cache = {}
 
 def apply_watermark(frame, cfg):
     """
-    Apply watermark ke frame OpenCV (BGR).
+    Apply the watermark to an OpenCV (BGR) frame.
     Called per frame by the renderers; the renderer itself is cached.
 
     Args:
@@ -455,12 +455,25 @@ def apply_watermark(frame, cfg):
     if not getattr(cfg, "watermark_enabled", False):
         return frame
 
-    # Cache renderer per cfg object identity
-    cfg_id = id(cfg)
-    if cfg_id not in _renderer_cache:
-        _renderer_cache[cfg_id] = create_watermark_renderer(cfg)
+    # Cache on the watermark settings, not id(cfg): ids are reused after a cfg
+    # is garbage-collected, so a long-lived worker could pick up the renderer
+    # belonging to a previous job.
+    cache_key = tuple(
+        getattr(cfg, attr, None)
+        for attr in (
+            "watermark_text",
+            "watermark_image",
+            "watermark_opacity",
+            "watermark_position",
+            "watermark_padding",
+            "watermark_font_size",
+            "watermark_scale",
+        )
+    )
+    if cache_key not in _renderer_cache:
+        _renderer_cache[cache_key] = create_watermark_renderer(cfg)
 
-    renderer = _renderer_cache[cfg_id]
+    renderer = _renderer_cache[cache_key]
     if renderer is None:
         return frame
 

@@ -722,7 +722,7 @@ Proyek ini menyertakan uploader YouTube mandiri (standalone) dengan dukungan pen
    python -m app.cli upload-youtube
 
    # Atau jalankan dengan argumen kustom (contoh):
-   python -m app.cli upload-youtube --interval-hours 12 --tz-name "Asia/Jakarta"
+   python -m app.cli upload-youtube --interval-hours 12 --tz-name "Asia/Kolkata"
    ```
 3. Untuk mengetes hanya dengan video pertama, jalankan dengan argumen `--test-mode`. Gunakan perintah `python -m app.cli upload-youtube --help` untuk melihat semua opsi timezone, safety-config, dan penjadwalan.
 4. Untuk mengatur ulang jadwal video yang masih scheduled/private, gunakan `python -m app.cli reschedule-youtube [--apply]` (dry-run secara default).
@@ -765,7 +765,7 @@ python -m app.cli upload-instagram --help
 | `--manifest-file` | `outputs/render_manifest.json` | Input manifest dari pipeline clipping |
 | `--result-file` | `outputs/ig_upload_results.json` | Output file JSON trace publish |
 | `--updated-manifest` | `outputs/render_manifest_ig_uploaded.json` | Manifest terupdate dengan status publish |
-| `--tz-name` | `$APP_TIMEZONE` atau `Asia/Makassar` | Timezone untuk perhitungan interval (format IANA) |
+| `--tz-name` | `$APP_TIMEZONE` atau `Asia/Kolkata` | Timezone untuk perhitungan interval (format IANA) |
 | `--interval-hours` | `5` | Jarak minimum antar publish (jam) |
 | `--test-mode` | `false` | Publish hanya item pertama yang pending |
 | `--publish-now` | `false` | Abaikan interval, publish seluruh batch berurutan |

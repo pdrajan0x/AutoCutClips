@@ -157,8 +157,8 @@ def prepare_typography_fonts(cfg):
     Ensure all required typography fonts for the selected style are downloaded and registered.
 
     Args:
-        cfg: Runtime configuration object that contains `daftar_font` (font dictionary), 
-             `gaya_font_aktif` (active style key), and `font_dir` (destination directory).
+        cfg: Runtime configuration object that contains `font_presets` (font dictionary), 
+             `active_font_style` (active style key), and `font_dir` (destination directory).
 
     Returns:
         None
@@ -171,12 +171,12 @@ def prepare_typography_fonts(cfg):
     Raises:
         RuntimeError: If either the primary or secondary required fonts fail to download or validate.
     """
-    daftar_font = cfg.daftar_font
-    style = cfg.gaya_font_aktif
+    font_presets = cfg.font_presets
+    style = cfg.active_font_style
     font_dir = cfg.font_dir
 
-    f_primary = daftar_font[style]["utama"]
-    f_accent = daftar_font[style]["khusus"]
+    f_primary = font_presets[style]["main"]
+    f_accent = font_presets[style]["accent"]
 
     ok_primary = download_google_font(f_primary["url"], f_primary["file"], font_dir)
     ok_accent = download_google_font(f_accent["url"], f_accent["file"], font_dir)

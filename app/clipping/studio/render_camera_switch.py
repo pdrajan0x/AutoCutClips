@@ -22,6 +22,7 @@ def render_camera_switch_video(
     diarization_data,
     cfg,
     label="CameraSwitch",
+    broll_data=None,
 ):
     """
     Render a dynamic camera-switch video, which cuts between active speakers automatically.
@@ -32,10 +33,11 @@ def render_camera_switch_video(
         start_clip (float): Subclip start boundary in seconds.
         end_clip (float): Subclip end boundary in seconds.
         ratio (str): Output ratio string ('9:16' or '16:9').
+        diarization_data (list | None): Timeline of active speakers; None falls
+            back to treating the clip as single-speaker.
         cfg: The runtime config containing camera-switch timing preferences.
-        broll_data (list, optional): Data about B-roll sequences to blend in.
         label (str, optional): Progress reporting name.
-        segment_data (list, optional): The timeline of active speakers.
+        broll_data (list, optional): Data about B-roll sequences to blend in.
 
     Returns:
         callable: A function mapping timestamp to horizontal subtitle coordinate `get_x_final(t)`.
@@ -79,7 +81,7 @@ def render_camera_switch_video(
     detector = None
     if cfg.face_detector == "yolo":
         if not os.path.exists(cfg.file_yolo_model):
-            print(f"   📥 Mendownload YOLOv8 Face Model ({cfg.yolo_size})...")
+            print(f"   📥 Downloading the YOLOv8 face model ({cfg.yolo_size})...")
             import urllib.request
 
             urllib.request.urlretrieve(cfg.url_yolo_model, cfg.file_yolo_model)
@@ -109,15 +111,14 @@ def render_camera_switch_video(
         crop_w = width
         crop_h = int(width / crop_ratio)
 
-    default_x = (width - crop_w) // 2
-
-    # All unique speakers in this clip
-    speakers = sorted(set(s["speaker"] for s in diarization_data))
+    # All unique speakers in this clip. The custom-hook path deliberately passes
+    # no diarization, so fall back to a single speaker rather than crashing.
+    speakers = sorted(set(s["speaker"] for s in diarization_data or []))
     if not speakers:
         speakers = ["SPEAKER_00"]
 
     # ================================================================
-    # FASE 1 — Per-speaker face profiling (diarization-guided)
+    # PHASE 1 — Per-speaker face profiling (diarization-guided)
     # ================================================================
     # Strategy:
     #   1 active + 1 face  → trivial: face belongs to active speaker
@@ -300,7 +301,7 @@ def render_camera_switch_video(
             raw_data[spk].append({"time": fd["time"], "cx": best[0], "cy": best[1], "dist": d_near})
 
     # ================================================================
-    # FASE 2 — Smooth per-speaker camera positions
+    # PHASE 2 — Smooth per-speaker camera positions
     # ================================================================
     def _smooth_positions_cs(raw_list):
         smooth_list = []
@@ -439,7 +440,7 @@ def render_camera_switch_video(
                 return res
         return []
 
-    # FASE 3: RENDER FRAME
+    # PHASE 3: RENDER FRAME
     out_w, out_h = _get_render_dims(cfg, ratio, source_h=height)
     
     dev_visualize = cfg.dev_mode # Assume only for 9:16 as described
@@ -460,7 +461,7 @@ def render_camera_switch_video(
     last_speaker_pos: dict[str, tuple[float, float, float]] = {}
     prev_speaker = None  # the speaker before the switch, used to detect a transition
     SWITCH_BLEND_DUR = float(getattr(cfg, "switch_blend_duration", 0.0))
-    switch_blend_t0 = -1.0  # waktu mulai blending setelah switch
+    switch_blend_t0 = -1.0  # when blending starts after a switch
 
     def _resolve_switch_pos(speaker, t, is_new_switch):
         """Return (cx, cy, zoom) with anti-sliding cache + optional blend."""
@@ -519,6 +520,11 @@ def render_camera_switch_video(
 
             timestamp_abs = start_clip + t
             active_speakers = get_active_speakers(diarization_data, timestamp_abs)
+
+            # tracking_log stores the crop CENTRE (subtitles.py reads it as one).
+            # Seed it per frame: the dev-visualisation branch below never updates
+            # current_speaker, so otherwise cx could stay unbound.
+            cx = width // 2
 
             if dev_visualize:
                 # Dev visualization for camera-switch
@@ -594,7 +600,7 @@ def render_camera_switch_video(
                     not speaker_is_solo.get(spk, False) for spk in active_speakers
                 )
                 if all_multi_scene:
-                    cx = (width - crop_w) // 2
+                    cx = width // 2
                     out_frame = _make_blurred_pillarbox(frame)
                 else:
                     is_new_switch = False
@@ -645,7 +651,7 @@ def render_camera_switch_video(
                     crop_fr = frame[y_full : y_full + eff_ch, x_full : x_full + eff_cw]
                     out_frame = _resize_frame(crop_fr, (out_w, out_h))
                 else:
-                    cx = (width - crop_w) // 2 # Center for blurred view
+                    cx = width // 2  # Centre for the blurred pillarbox view
                     out_frame = _make_blurred_pillarbox(frame)
 
             # --- B-ROLL OVERLAY ---
@@ -708,7 +714,7 @@ def render_camera_switch_video(
         # Helper for subtitle positioning
         def get_x_final(t):
             if not tracking_log:
-                return default_x
+                return width // 2  # centre, matching what tracking_log stores
             if t <= tracking_log[0][0]:
                 return int(tracking_log[0][1])
             

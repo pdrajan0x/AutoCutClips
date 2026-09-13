@@ -144,7 +144,7 @@ All notable changes to the **AutoCutClips** project will be documented in this f
   - `--result-file`: Output upload trace JSON (default: `outputs/fb_upload_results.json`).
   - `--interval-hours`: Gap between scheduled videos (default: `5`).
   - `--test-mode`: Upload only the first video for testing.
-  - `--tz-name`: Timezone for scheduling (default: `Asia/Makassar`).
+  - `--tz-name`: Timezone for scheduling (default: `Asia/Kolkata`).
 
 ### New Modules
 - **`facebook_uploader/__init__.py`**: Package init, exports `upload_manifest_to_facebook`.

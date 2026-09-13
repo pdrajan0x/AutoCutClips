@@ -33,9 +33,24 @@ def build_thumbnail(video_path, output_image_path, text, cfg):
         urllib.request.urlretrieve(cfg.url_font_thumbnail, cfg.file_font_thumbnail)
 
     cap = cv2.VideoCapture(video_path)
-    cap.set(cv2.CAP_PROP_POS_MSEC, 5000)
-    ret, frame = cap.read()
-    cap.release()
+    try:
+        # Prefer a frame a little way in, but scale to the clip: a fixed 5s seek
+        # lands past the end of a short clip and yields no thumbnail at all.
+        fps = cap.get(cv2.CAP_PROP_FPS) or 0
+        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+        duration = frame_count / fps if fps > 0 else 0
+        seek_ms = min(5000, duration * 1000 * 0.2) if duration > 0 else 0
+
+        if seek_ms > 0:
+            cap.set(cv2.CAP_PROP_POS_MSEC, seek_ms)
+        ret, frame = cap.read()
+
+        if not ret:
+            # Seeking can fail on odd containers — fall back to the first frame.
+            cap.set(cv2.CAP_PROP_POS_MSEC, 0)
+            ret, frame = cap.read()
+    finally:
+        cap.release()
 
     if not ret:
         return

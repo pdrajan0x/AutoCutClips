@@ -2,6 +2,7 @@ import os
 import urllib.request
 
 import cv2
+import mediapipe as mp
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 
@@ -116,8 +117,8 @@ def estimate_speaker_count_from_video(video_path: str, cfg) -> int:
             if results and len(results[0].boxes) > 0:
                 faces_in_frame = len(results[0].boxes)
         else:
-            mp_image = mp_python.Image(
-                image_format=mp_python.ImageFormat.SRGB,
+            mp_image = mp.Image(
+                image_format=mp.ImageFormat.SRGB,
                 data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
             )
             results = detector.detect(mp_image)

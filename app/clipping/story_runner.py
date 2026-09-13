@@ -31,14 +31,14 @@ def _transcribe_sources(
     Returns
     -------
     dict[str, dict]
-        Mapping of source_id -> {"transkrip", "segmen", "path"}.
+        Mapping of source_id -> {"transcript", "segments", "path"}.
     """
     from . import engine
 
     whisper_model = getattr(cfg, "whisper_model", "large-v3")
     whisper_device = getattr(cfg, "whisper_device", "cuda")
     whisper_compute = getattr(cfg, "whisper_compute_type", "float16")
-    max_words = getattr(cfg, "max_kata_per_subtitle", 5)
+    max_words = getattr(cfg, "max_words_per_subtitle", 5)
 
     transcripts: dict[str, dict] = {}
     total = len(cached_paths)
@@ -74,8 +74,8 @@ def _transcribe_sources(
 
         result = {
             "source_id": sid,
-            "transkrip": transcript,
-            "segmen": segments,
+            "transcript": transcript,
+            "segments": segments,
             "path": transcript_path,
         }
         with open(transcript_path, "w", encoding="utf-8") as f:
@@ -199,7 +199,7 @@ def run_story_pipeline(cfg) -> list[dict]:
     # --- Step 5: assemble every clip ---
     clips = recipe["clips"]
     defaults = recipe.get("_defaults")
-    ratio = getattr(cfg, "pilihan_rasio", None) or (defaults.ratio if defaults else "9:16")
+    ratio = getattr(cfg, "aspect_ratio", None) or (defaults.ratio if defaults else "9:16")
 
     story_output_dir = getattr(cfg, "story_output_dir", None) or os.path.join(
         cfg.outputs_dir, "story_clips"
@@ -227,7 +227,7 @@ def run_story_pipeline(cfg) -> list[dict]:
             {
                 sid: {
                     "path": t.get("path", ""),
-                    "segmen_count": len(t.get("segmen", [])),
+                    "segment_count": len(t.get("segments", [])),
                 }
                 for sid, t in transcripts.items()
             },

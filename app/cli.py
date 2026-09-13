@@ -24,7 +24,15 @@ import sys
 
 VERSION = "1.12.0"
 DEFAULT_TZ_ENV = "APP_TIMEZONE"
-DEFAULT_TZ = "Asia/Makassar"
+DEFAULT_TZ = "Asia/Kolkata"
+
+# The pipeline logs emoji throughout; on a legacy-codepage console (Windows
+# cp1252) that raises UnicodeEncodeError mid-render and kills the run.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
 
 
 def _default_tz() -> str:
@@ -55,7 +63,7 @@ def _print_story_summary(cfg) -> None:
         [
             ("Recipe", cfg.story_recipe_path),
             ("Sources", cfg.sources_json_path),
-            ("Ratio", cfg.pilihan_rasio),
+            ("Ratio", cfg.aspect_ratio),
             ("Output Dir", cfg.story_output_dir),
             ("Skip DL", "YES" if cfg.skip_download else "NO"),
         ],
@@ -74,15 +82,16 @@ def _print_clip_summary(cfg) -> None:
     rows = [
         ("Source", platform_labels.get(platform_key, platform_key)),
         ("URL", cfg.url_youtube),
-        ("Clips", cfg.jumlah_clip),
-        ("Ratio", cfg.pilihan_rasio),
-        ("Font Style", cfg.gaya_font_aktif),
+        ("Clips", cfg.clip_count),
+        ("Ratio", cfg.aspect_ratio),
+        ("Font Style", cfg.active_font_style),
         ("Subtitles", _on_off(not cfg.no_subs)),
         ("B-Roll", _on_off(cfg.use_broll)),
         ("Hook Glitch", _on_off(cfg.use_hook_glitch)),
         ("BGM", _on_off(cfg.use_auto_bgm)),
         ("Karaoke", _on_off(cfg.use_karaoke_effect)),
         ("Split-Screen", _on_off(cfg.use_split_screen)),
+        ("Camera-Switch", _on_off(getattr(cfg, "use_camera_switch", False))),
     ]
     if cfg.use_split_screen:
         rows += [
@@ -109,6 +118,53 @@ def _print_clip_summary(cfg) -> None:
     _banner(f"🎬 AutoCutClips v{VERSION}", rows)
 
 
+def _preflight_warnings(cfg) -> list[str]:
+    """
+    Report requested features that will silently degrade, before any work runs.
+
+    These used to surface only part-way through the pipeline — after the
+    download, transcription and AI call had already been paid for.
+    """
+    warnings: list[str] = []
+
+    wants_diarization = getattr(cfg, "use_camera_switch", False) or (
+        getattr(cfg, "use_split_screen", False)
+        and getattr(cfg, "split_trigger", "diarization") == "diarization"
+    )
+    if wants_diarization and not cfg.hf_token:
+        mode = "--camera-switch" if getattr(cfg, "use_camera_switch", False) else "--split-screen"
+        warnings.append(
+            f"{mode} needs HF_TOKEN for speaker diarization, which is not set — "
+            "the run will fall back to the standard single-frame render.\n"
+            "     Set HF_TOKEN in your .env, and accept the model agreement at\n"
+            "     https://huggingface.co/pyannote/speaker-diarization-3.1\n"
+            "     (--split-screen can instead use --split-trigger face, which needs no token.)"
+        )
+
+    if getattr(cfg, "use_broll", False) and not getattr(cfg, "pexels_api_key", ""):
+        warnings.append(
+            "B-roll is enabled but PEXELS_API_KEY is not set — clips will render "
+            "without stock footage. Pass --no-broll to silence this."
+        )
+
+    ratio = getattr(cfg, "aspect_ratio", "9:16")
+    if getattr(cfg, "use_camera_switch", False) and getattr(cfg, "use_split_screen", False):
+        warnings.append(
+            "--camera-switch and --split-screen were both given; split-screen wins."
+        )
+
+    vertical = {"9:16", "1:1", "3:4", "4:5"}
+    if (
+        getattr(cfg, "use_camera_switch", False) or getattr(cfg, "use_split_screen", False)
+    ) and ratio not in vertical:
+        warnings.append(
+            f"Podcast modes only apply to vertical ratios {sorted(vertical)}; "
+            f"--ratio {ratio} will render normally."
+        )
+
+    return warnings
+
+
 def clip(argv: list[str] | None = None) -> None:
     """Run the auto-clip pipeline, or story mode when --story-mode is set."""
     from .clipping.config import build_config
@@ -132,6 +188,11 @@ def clip(argv: list[str] | None = None) -> None:
     from .clipping.runner import run_pipeline
 
     _print_clip_summary(cfg)
+
+    for warning in _preflight_warnings(cfg):
+        print(f"\n⚠️  {warning}")
+    print()
+
     run_pipeline(cfg)
     print("\n✅ Done! Every clip has been rendered.")
 

@@ -47,7 +47,7 @@ def build_ass_file(
 
     typo_dict = {}
     for plan in typography_plan:
-        clean_word = plan.get("kata_utama", "").lower().strip(string.punctuation)
+        clean_word = plan.get("word", "").lower().strip(string.punctuation)
         typo_dict[clean_word] = plan
 
     use_advanced_text = cfg.use_advanced_text and use_advanced
@@ -56,20 +56,20 @@ def build_ass_file(
     outline_val = 3 if use_karaoke else 0.2
     shadow_val = 2.5 if use_karaoke else 0.2
 
-    daftar_font = cfg.daftar_font
-    style = cfg.gaya_font_aktif
+    font_presets = cfg.font_presets
+    style = cfg.active_font_style
     font_dir = cfg.font_dir
 
-    primary_font_dict = daftar_font[style]["utama"]
-    accent_font_dict = daftar_font[style]["khusus"]
+    primary_font_dict = font_presets[style]["main"]
+    accent_font_dict = font_presets[style]["accent"]
 
-    primary_font = primary_font_dict["nama"]
-    accent_font = accent_font_dict["nama"]
+    primary_font = primary_font_dict["name"]
+    accent_font = accent_font_dict["name"]
 
     accent_scale_base = (
-        cfg.scale_kata_khusus_916 if _is_vertical_ratio(ratio) else cfg.scale_kata_khusus_169
+        cfg.accent_word_scale_916 if _is_vertical_ratio(ratio) else cfg.accent_word_scale_169
     )
-    accent_color = cfg.warna_kata_khusus
+    accent_color = cfg.accent_word_color
 
     def get_scale_value(level):
         if level == 3:
@@ -110,8 +110,8 @@ def build_ass_file(
         f"Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
 
-    def font_exists_in_dir(nama_file, min_valid_size=1000):
-        path = os.path.join(font_dir, nama_file)
+    def font_exists_in_dir(file_name, min_valid_size=1000):
+        path = os.path.join(font_dir, file_name)
         return os.path.exists(path) and os.path.getsize(path) > min_valid_size
 
     if not use_advanced_text:
@@ -176,9 +176,9 @@ def build_ass_file(
         return font_cache[key]
 
     def build_font_tag(font_info):
-        nama = str(font_info["nama"]).replace("{", "").replace("}", "").strip()
+        name = str(font_info["name"]).replace("{", "").replace("}", "").strip()
         bold = 1 if int(font_info.get("bold", 0)) else 0
-        return f"\\fn{nama}\\b{bold}"
+        return f"\\fn{name}\\b{bold}"
 
     max_line_width = play_res_x - (margin_lr * 2)
     space_width = font_sz * 0.25
@@ -203,9 +203,9 @@ def build_ass_file(
                 plan = typo_dict.get(word_clean)
 
                 if plan:
-                    w_style = plan.get("style", "khusus")
+                    w_style = plan.get("style", "accent")
                     w_scale = get_scale_value(plan.get("scale_level", 2))
-                    is_accent = w_style == "khusus"
+                    is_accent = w_style == "accent"
 
                     pil_font = get_cached_font(is_accent, w_scale)
                     raw_w = (
@@ -288,13 +288,13 @@ def build_ass_file(
                     w_end_ms = int((w_data["end"] - seg_s) * 1000)
 
                     if w_data["plan"]:
-                        w_style = w_data["plan"].get("style", "khusus")
-                        w_anim = w_data["plan"].get("animasi", "bounce_pop")
+                        w_style = w_data["plan"].get("style", "accent")
+                        w_anim = w_data["plan"].get("animation", "bounce_pop")
                         target_scale = get_scale_value(
                             w_data["plan"].get("scale_level", 2)
                         )
                         font_info = (
-                            accent_font_dict if w_style == "khusus" else primary_font_dict
+                            accent_font_dict if w_style == "accent" else primary_font_dict
                         )
                         f_tag = build_font_tag(font_info)
                         c_tag = f"\\c{accent_color}"

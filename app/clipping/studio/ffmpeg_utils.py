@@ -4,8 +4,6 @@ FFmpeg and encoder utilities for Studio rendering pipeline.
 
 import subprocess
 
-from .utils import format_seconds
-
 
 def format_seconds(seconds):
     """
@@ -108,14 +106,21 @@ def detect_video_encoder(cfg=None, target_h=1080):
     if target_bitrate == "auto":
         target_bitrate = _get_auto_bitrate(target_h)
 
+    # Normalise once: target_bitrate was lowercased above, so a user-supplied
+    # "8M" would otherwise reach float("8m") and raise.
+    bitrate_mbps = float(str(target_bitrate).lower().rstrip("m").strip() or 0)
+    target_bitrate = f"{bitrate_mbps:g}M"
+    maxrate = f"{int(bitrate_mbps * 1.5)}M"
+    bufsize = f"{int(bitrate_mbps * 2)}M"
+
     nvenc_args_fastest = [
         "-c:v", "h264_nvenc",
         "-preset", nvenc_preset_fast,
         "-rc", "vbr",
         "-cq", str(nvenc_cq),
         "-b:v", target_bitrate,
-        "-maxrate", f"{int(float(target_bitrate.replace('M', '')) * 1.5)}M",
-        "-bufsize", f"{int(float(target_bitrate.replace('M', '')) * 2)}M",
+        "-maxrate", maxrate,
+        "-bufsize", bufsize,
     ]
     nvenc_args_legacy = [
         "-c:v", "h264_nvenc",
@@ -123,14 +128,14 @@ def detect_video_encoder(cfg=None, target_h=1080):
         "-rc", "vbr",
         "-cq", str(nvenc_cq),
         "-b:v", target_bitrate,
-        "-maxrate", f"{int(float(target_bitrate.replace('M', '')) * 1.5)}M",
-        "-bufsize", f"{int(float(target_bitrate.replace('M', '')) * 2)}M",
+        "-maxrate", maxrate,
+        "-bufsize", bufsize,
     ]
     amf_args = [
         "-c:v", "h264_amf",
         "-b:v", target_bitrate,
-        "-maxrate", f"{int(float(target_bitrate.replace('M', '')) * 1.5)}M",
-        "-bufsize", f"{int(float(target_bitrate.replace('M', '')) * 2)}M",
+        "-maxrate", maxrate,
+        "-bufsize", bufsize,
     ]
     vaapi_args = [
         "-init_hw_device", "vaapi=va:/dev/dri/renderD128",
@@ -138,15 +143,15 @@ def detect_video_encoder(cfg=None, target_h=1080):
         "-vf", "format=nv12,hwupload",
         "-c:v", "h264_vaapi",
         "-b:v", target_bitrate,
-        "-maxrate", f"{int(float(target_bitrate.replace('M', '')) * 1.5)}M",
-        "-bufsize", f"{int(float(target_bitrate.replace('M', '')) * 2)}M",
+        "-maxrate", maxrate,
+        "-bufsize", bufsize,
     ]
     cpu_args = [
         "-c:v", "libx264",
         "-preset", cpu_preset,
         "-crf", str(cpu_crf),
         "-maxrate", target_bitrate,
-        "-bufsize", f"{int(float(target_bitrate.replace('M', '')) * 2)}M",
+        "-bufsize", bufsize,
     ]
 
     # ponytail: NVENC -> AMD AMF -> AMD VAAPI -> CPU
@@ -173,7 +178,7 @@ def detect_video_encoder(cfg=None, target_h=1080):
             print(f"🚀 Using AMD VAAPI (Bitrate {target_bitrate})", flush=True)
             return {"name": "h264_vaapi", "args": vaapi_args}
 
-    print(f"⚠️ Fallback ke CPU libx264 ({cpu_preset}, CRF {cpu_crf}, Max {target_bitrate})", flush=True)
+    print(f"⚠️ Falling back to CPU libx264 ({cpu_preset}, CRF {cpu_crf}, Max {target_bitrate})", flush=True)
     return {"name": "libx264", "args": cpu_args}
 
 

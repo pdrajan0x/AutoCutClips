@@ -27,7 +27,7 @@ IG_USER_ID=your-instagram-user-id
 IG_ACCESS_TOKEN=your-long-lived-access-token
 IG_GRAPH_VERSION=v25.0            # Optional, defaults to v25.0
 IG_PUBLIC_BASE_URL=https://your-domain.example/clips   # Optional
-APP_TIMEZONE=Asia/Jakarta         # Optional, used for interval scheduling
+APP_TIMEZONE=Asia/Kolkata         # Optional, used for interval scheduling
 ```
 
 | Variable | Required | Description |
@@ -71,7 +71,7 @@ This will:
 | `--manifest-file` | `outputs/render_manifest.json` | Input manifest from the clipping pipeline |
 | `--result-file` | `outputs/ig_upload_results.json` | Output JSON trace of the publish responses |
 | `--updated-manifest` | `outputs/render_manifest_ig_uploaded.json` | Output manifest enriched with publish results |
-| `--tz-name` | `$APP_TIMEZONE` or `Asia/Makassar` | Timezone used for the interval maths (IANA name) |
+| `--tz-name` | `$APP_TIMEZONE` or `Asia/Kolkata` | Timezone used for the interval maths (IANA name) |
 | `--interval-hours` | `5` | Minimum gap between publishes; later clips are deferred to a future run |
 | `--test-mode` | `False` | Publish only the first pending item, for testing |
 | `--publish-now` | `False` | Ignore `--interval-hours` and publish the whole batch back to back |
@@ -81,7 +81,7 @@ This will:
 python -m app.cli upload-instagram --test-mode
 
 # Custom interval (3 hours between Reels)
-python -m app.cli upload-instagram --interval-hours 3 --tz-name "Asia/Jakarta"
+python -m app.cli upload-instagram --interval-hours 3 --tz-name "Asia/Kolkata"
 
 # Publish everything immediately, ignoring the interval
 python -m app.cli upload-instagram --publish-now

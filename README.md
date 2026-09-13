@@ -656,7 +656,7 @@ The project includes a standalone YouTube auto-uploader with scheduling support!
    python -m app.cli upload-youtube
 
    # Or run with custom arguments (example):
-   python -m app.cli upload-youtube --interval-hours 12 --tz-name "Asia/Jakarta"
+   python -m app.cli upload-youtube --interval-hours 12 --tz-name "Asia/Kolkata"
    ```
 3. To run a test with only the first video, use `python -m app.cli upload-youtube --test-mode`. Run `python -m app.cli upload-youtube --help` to see all scheduling, safety-config, and timezone options.
 4. To re-space videos that are still scheduled/private, use `python -m app.cli reschedule-youtube [--apply]` (dry-run by default).
@@ -699,7 +699,7 @@ python -m app.cli upload-instagram --help
 | `--manifest-file` | `outputs/render_manifest.json` | Input manifest from the clipping pipeline |
 | `--result-file` | `outputs/ig_upload_results.json` | Output JSON trace file |
 | `--updated-manifest` | `outputs/render_manifest_ig_uploaded.json` | Updated manifest with publish status |
-| `--tz-name` | `$APP_TIMEZONE` or `Asia/Makassar` | Timezone for the interval maths (IANA format) |
+| `--tz-name` | `$APP_TIMEZONE` or `Asia/Kolkata` | Timezone for the interval maths (IANA format) |
 | `--interval-hours` | `5` | Minimum gap between publishes (hours) |
 | `--test-mode` | `false` | Publish only the first pending item |
 | `--publish-now` | `false` | Ignore the interval and publish the whole batch back to back |

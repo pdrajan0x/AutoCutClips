@@ -1,0 +1,26 @@
+{
+  "$schema": "target_accounts_v1",
+  "_comment": "Routing table used by the AI to assign each clip to one of your publishing accounts. Edit 'handle' to your real account names, or add/remove categories. Point at a different file with --target-accounts, or disable routing entirely with --no-account-routing.",
+  "accounts": {
+    "Business": {
+      "handle": "@yourbrand.business",
+      "angle": "The angle is business, brand, revenue, sales, founders, marketing, or small business operations.",
+      "bio": "Business insight, founder stories and brand breakdowns."
+    },
+    "Life": {
+      "handle": "@yourbrand.life",
+      "angle": "The angle is personal life, lifestyle, career, mindset, relationships, personal finance, or self growth.",
+      "bio": "Clips to upgrade your life, mindset and career."
+    },
+    "Creator": {
+      "handle": "@yourbrand.creator",
+      "angle": "The angle is digital content, AI, tools, affiliate, content workflow, or monetising an audience.",
+      "bio": "Making digital content work: AI, tools and monetisation."
+    },
+    "Tech": {
+      "handle": "@yourbrand.tech",
+      "angle": "The angle is technology, software, engineering, product, science, or how something technical actually works.",
+      "bio": "Technology and engineering explained without the fluff."
+    }
+  }
+}

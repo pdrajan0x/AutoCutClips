@@ -34,7 +34,7 @@ YOUTUBE_SCOPES = [
     "https://www.googleapis.com/auth/youtube.readonly",
 ]
 
-DEFAULT_TZ = "Asia/Makassar"
+DEFAULT_TZ = "Asia/Kolkata"
 
 
 # ==============================================================================
@@ -264,8 +264,7 @@ def upload_video_to_youtube(
 
     title = normalize_text(
         item.get("youtube_title_final")
-        or item.get("title_inggris")
-        or item.get("title_indonesia")
+        or item.get("title")
         or f"Clip Rank {item.get('rank', '?')}"
     )[:100]
     description = normalize_text(item.get("youtube_description_final", ""))

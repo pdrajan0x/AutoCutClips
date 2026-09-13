@@ -30,6 +30,8 @@ For narrative explanations of each feature, see the numbered pages in this wiki
 | `--source-height` | `max` or int, default `max` | Max source download height; `max` fetches the highest available quality. |
 | `--render-height` | str, `1080` | Target output height; `source` matches the source video, or give a number (1080, 1440). |
 | `--load-gemini-json` | flag, `False` | Reuse the saved `gemini_response.json` and skip the AI step (for debugging). |
+| `--target-accounts` | str, `target_accounts.json` | Path to the JSON routing table the AI uses to assign each clip to a publishing account. Built-in English defaults are used when the file is absent. |
+| `--no-account-routing` | flag, `False` | Disable account classification entirely; the AI then spends its effort on clip selection and metadata only. |
 
 ## Rendering / Studio Effects
 
@@ -179,7 +181,7 @@ clean, with no subtitles or overlays.
 | `--manifest-file` | str, `outputs/render_manifest.json` | Input manifest from the clipping pipeline. |
 | `--result-file` | str, `outputs/youtube_upload_results.json` | Output JSON trace of the upload responses. |
 | `--updated-manifest` | str, `outputs/render_manifest_uploaded.json` | Output manifest enriched with the upload results. |
-| `--tz-name` | str, `$APP_TIMEZONE` or `Asia/Makassar` | Timezone used for scheduling (IANA name). |
+| `--tz-name` | str, `$APP_TIMEZONE` or `Asia/Kolkata` | Timezone used for scheduling (IANA name). |
 | `--interval-hours` | int, `24` | Gap between scheduled publishes; the safety config enforces a minimum. |
 | `--start-local` | str, `None` | Manual first publish time (`YYYY-MM-DD HH:MM`), bypassing queue detection. |
 | `--test-mode` | flag, `False` | Upload only the first pending item. |
@@ -195,7 +197,7 @@ clean, with no subtitles or overlays.
 | Argument | Type / Default | Description |
 | --- | --- | --- |
 | `--token-file` | str, `.credentials/youtube_token.json` | YouTube OAuth token JSON. Needs the `youtube.force-ssl` scope. |
-| `--tz-name` | str, `Asia/Makassar` | Timezone for the new schedule. |
+| `--tz-name` | str, `Asia/Kolkata` | Timezone for the new schedule. |
 | `--interval-hours` | int, `2` | New gap between scheduled publishes. |
 | `--start-local` | str, `None` | Manual start time for the first slot (`YYYY-MM-DD HH:MM`). |
 | `--max-pages` | int, `10` | How many playlist pages to scan for scheduled videos. |
@@ -221,7 +223,7 @@ clean, with no subtitles or overlays.
 | `--manifest-file` | str, `outputs/render_manifest.json` | Input manifest from the clipping pipeline. |
 | `--result-file` | str, `outputs/ig_upload_results.json` | Output JSON trace of the publish responses. |
 | `--updated-manifest` | str, `outputs/render_manifest_ig_uploaded.json` | Output manifest enriched with the publish results. |
-| `--tz-name` | str, `$APP_TIMEZONE` or `Asia/Makassar` | Timezone used for the interval maths (IANA name). |
+| `--tz-name` | str, `$APP_TIMEZONE` or `Asia/Kolkata` | Timezone used for the interval maths (IANA name). |
 | `--interval-hours` | int, `5` | Minimum gap between publishes. Clips whose slot has not arrived are recorded as `deferred` for a later run. |
 | `--test-mode` | flag, `False` | Publish only the first pending item. |
 | `--publish-now` | flag, `False` | Ignore `--interval-hours` and publish the whole batch back to back. |
@@ -252,7 +254,7 @@ by environment variables and the `PUT /api/settings` endpoint.
 | `PEXELS_API_KEY` | — | Pexels key used to fetch B-roll. |
 | `HF_TOKEN` | — | HuggingFace token, required by Pyannote for the podcast modes. |
 | `MAX_CONCURRENT_JOBS` | `1` | Maximum jobs the web worker runs at once. |
-| `APP_TIMEZONE` | `Asia/Makassar` | Default timezone for the uploaders. |
+| `APP_TIMEZONE` | `Asia/Kolkata` | Default timezone for the uploaders. |
 | `OSC_VIDEO_SCALE_ALGO` | `lanczos` | Fallback for the OpenCV scaling algorithm (normally set from `--video-scale-algo`). |
 
 Settings writable through the API (`PUT /api/settings`): `google_api_key`,

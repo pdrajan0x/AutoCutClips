@@ -38,9 +38,9 @@ def _download_source(cfg, progress: Progress) -> None:
     """Fetch the source video, or reuse an existing local file."""
     if not cfg.url_youtube:
         # Web GUI flows pass an uploaded/previously downloaded file instead of a URL.
-        if not os.path.exists(cfg.file_video_asli):
+        if not os.path.exists(cfg.source_video_path):
             raise FileNotFoundError(
-                f"No source video found at {cfg.file_video_asli} and no URL was given."
+                f"No source video found at {cfg.source_video_path} and no URL was given."
             )
         progress("download", 1, "Reusing the existing source video.", 14.0)
         return
@@ -48,7 +48,7 @@ def _download_source(cfg, progress: Progress) -> None:
     progress("download", 1, "Downloading the source video...", 5.0)
     engine.download_video(
         cfg.url_youtube,
-        cfg.file_video_asli,
+        cfg.source_video_path,
         getattr(cfg, "use_dlp_subs", False),
         getattr(cfg, "download_source_height", "max"),
         source_platform=getattr(cfg, "source_platform", "youtube"),
@@ -65,10 +65,10 @@ def _transcribe(cfg, progress: Progress) -> tuple[str, list[dict]]:
 
     if source_platform == "youtube" and getattr(cfg, "use_dlp_subs", False):
         # The subtitle language suffix is unknown (.id.json3 / .en.json3), so glob.
-        json3_files = glob.glob(cfg.file_video_asli.replace(".mp4", ".*.json3"))
+        json3_files = glob.glob(cfg.source_video_path.replace(".mp4", ".*.json3"))
         if json3_files and os.path.exists(json3_files[0]):
             transcript, segments = engine.parse_youtube_json3_subs(
-                json3_files[0], max_words_per_subtitle=cfg.max_kata_per_subtitle
+                json3_files[0], max_words_per_subtitle=cfg.max_words_per_subtitle
             )
             if transcript and segments:
                 print(
@@ -78,8 +78,8 @@ def _transcribe(cfg, progress: Progress) -> tuple[str, list[dict]]:
 
     if not transcript or not segments:
         transcript, segments = engine.transcribe_video(
-            cfg.file_video_asli,
-            max_words_per_subtitle=cfg.max_kata_per_subtitle,
+            cfg.source_video_path,
+            max_words_per_subtitle=cfg.max_words_per_subtitle,
             model_size=cfg.whisper_model,
             device=cfg.whisper_device,
             compute_type=cfg.whisper_compute_type,
@@ -116,20 +116,20 @@ def _run_diarization(cfg, progress: Progress):
         getattr(cfg, "use_split_screen", False) and cfg.split_trigger == "diarization"
     ) or getattr(cfg, "use_camera_switch", False)
 
-    if not (needs_diarization and studio._is_vertical_ratio(cfg.pilihan_rasio)):
+    if not (needs_diarization and studio._is_vertical_ratio(cfg.aspect_ratio)):
         return None
 
     mode_label = "Split-Screen" if getattr(cfg, "use_split_screen", False) else "Camera-Switch"
-    audio_path = cfg.file_video_asli.replace(".mp4", "_audio.wav")
+    audio_path = cfg.source_video_path.replace(".mp4", "_audio.wav")
 
     try:
         progress("diarization", 5, f"[{mode_label}] Running speaker diarization...", 56.0)
-        diarization_mod.extract_audio(cfg.file_video_asli, audio_path)
+        diarization_mod.extract_audio(cfg.source_video_path, audio_path)
 
         num_speakers = getattr(cfg, "diarization_num_speakers", 2)
         min_spk = max_spk = None
         if str(num_speakers).lower() == "auto":
-            max_faces = studio.estimate_speaker_count_from_video(cfg.file_video_asli, cfg)
+            max_faces = studio.estimate_speaker_count_from_video(cfg.source_video_path, cfg)
             min_spk = max(1, max_faces)
             max_spk = min_spk + 2
             print(f"   ℹ️ Pyannote hint: between {min_spk} and {max_spk} speakers.")
@@ -251,15 +251,15 @@ def run_pipeline(cfg, on_progress=None) -> list[dict]:
     progress("render", 6, "Preparing the renderer...", 60.0)
     os.environ["OSC_VIDEO_SCALE_ALGO"] = str(getattr(cfg, "video_scale_algo", "lanczos"))
 
-    source_h = _source_height(cfg.file_video_asli)
-    _, target_h = studio._get_render_dims(cfg, cfg.pilihan_rasio, source_h=source_h)
+    source_h = _source_height(cfg.source_video_path)
+    _, target_h = studio._get_render_dims(cfg, cfg.aspect_ratio, source_h=source_h)
     video_encoder = studio.detect_video_encoder(cfg, target_h=target_h)
 
     file_glitch_ts = None
     if cfg.use_hook_glitch:
         print("⚙️ Preparing the glitch transition video...")
-        file_glitch_ts = studio.siapkan_glitch_video(
-            cfg.pilihan_rasio, cfg, video_encoder, source_h=source_h
+        file_glitch_ts = studio.prepare_glitch_video(
+            cfg.aspect_ratio, cfg, video_encoder, source_h=source_h
         )
 
     custom_hook_path = None
@@ -284,10 +284,10 @@ def run_pipeline(cfg, on_progress=None) -> list[dict]:
         if custom_hook_path:
             clip["custom_hook_info"] = {"file_path": custom_hook_path}
 
-        rendered = studio.proses_klip(
+        rendered = studio.process_clip(
             clip["rank"],
             clip,
-            cfg.pilihan_rasio,
+            cfg.aspect_ratio,
             file_glitch_ts,
             segments,
             cfg,

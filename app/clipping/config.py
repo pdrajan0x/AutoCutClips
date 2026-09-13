@@ -23,12 +23,12 @@ BASE_DIR = os.getcwd()
 FONT_DIR = os.path.abspath(os.path.join(BASE_DIR, "custom_fonts"))
 
 # 1. MAIN SETTINGS
-JUMLAH_CLIP = 7
-PILIHAN_RASIO = "9:16"
+CLIP_COUNT = 7
+ASPECT_RATIO = "9:16"
 
 # 2. CONTENT & HOOK SETTINGS
-MAX_KATA_PER_SUBTITLE = 5
-DURASI_HOOK = 3
+MAX_WORDS_PER_SUBTITLE = 5
+HOOK_DURATION = 3
 USE_BROLL = True
 USE_HOOK_GLITCH = True
 USE_SPLIT_SCREEN = False
@@ -45,60 +45,60 @@ USE_ADVANCED_TEXT = False
 USE_ADVANCED_TEXT_ON_HOOK = False
 USE_KARAOKE_EFFECT = True
 
-GAYA_FONT_AKTIF = "HORMOZI"
+ACTIVE_FONT_STYLE = "HORMOZI"
 
-DAFTAR_FONT = {
+FONT_PRESETS = {
     "DEFAULT": {
-        "utama": {
-            "nama": "Montserrat Black",
+        "main": {
+            "name": "Montserrat Black",
             "file": "Montserrat-Black.ttf",
             "url": "https://raw.githubusercontent.com/JulietaUla/Montserrat/master/fonts/ttf/Montserrat-Black.ttf",
             "bold": 1,
         },
-        "khusus": {
-            "nama": "Montserrat Medium",
+        "accent": {
+            "name": "Montserrat Medium",
             "file": "Montserrat-Medium.ttf",
             "url": "https://raw.githubusercontent.com/JulietaUla/Montserrat/master/fonts/ttf/Montserrat-Medium.ttf",
             "bold": 0,
         },
     },
     "STORYTELLER": {
-        "utama": {
-            "nama": "Inter",
+        "main": {
+            "name": "Inter",
             "file": "Inter-Regular.ttf",
             "url": "https://cdn.jsdelivr.net/fontsource/fonts/inter@latest/latin-400-normal.ttf",
             "bold": 0,
         },
-        "khusus": {
-            "nama": "Lora",
+        "accent": {
+            "name": "Lora",
             "file": "Lora-Bold.ttf",
             "url": "https://cdn.jsdelivr.net/fontsource/fonts/lora@latest/latin-700-normal.ttf",
             "bold": 1,
         },
     },
     "HORMOZI": {
-        "utama": {
-            "nama": "Montserrat",
+        "main": {
+            "name": "Montserrat",
             "file": "Montserrat-Regular.ttf",
             "url": "https://cdn.jsdelivr.net/fontsource/fonts/montserrat@latest/latin-400-normal.ttf",
             "bold": 0,
         },
-        "khusus": {
-            "nama": "Anton",
+        "accent": {
+            "name": "Anton",
             "file": "Anton-Regular.ttf",
             "url": "https://cdn.jsdelivr.net/fontsource/fonts/anton@latest/latin-400-normal.ttf",
             "bold": 0,
         },
     },
     "CINEMATIC": {
-        "utama": {
-            "nama": "Roboto",
+        "main": {
+            "name": "Roboto",
             "file": "Roboto-Regular.ttf",
             "url": "https://cdn.jsdelivr.net/fontsource/fonts/roboto@latest/latin-400-normal.ttf",
             "bold": 0,
         },
-        "khusus": {
-            "nama": "Bebas Neue",
+        "accent": {
+            "name": "Bebas Neue",
             "file": "BebasNeue-Regular.ttf",
             "url": "https://cdn.jsdelivr.net/fontsource/fonts/bebas-neue@latest/latin-400-normal.ttf",
             "bold": 0,
@@ -110,19 +110,19 @@ DAFTAR_FONT = {
 ASS_ALIGN_916 = 2
 ASS_MARGIN_916 = 450
 ASS_FONT_916 = 90
-SCALE_KATA_KHUSUS_916 = ASS_FONT_916 + 120
+ACCENT_WORD_SCALE_916 = ASS_FONT_916 + 120
 
 # 16:9 (horizontal) only
 ASS_ALIGN_169 = 2
 ASS_MARGIN_169 = 70
 ASS_FONT_169 = 80
-SCALE_KATA_KHUSUS_169 = ASS_FONT_169 + 120
+ACCENT_WORD_SCALE_169 = ASS_FONT_169 + 120
 
 # Accent word colour (ASS format is BGR: &H[Blue][Green][Red]&)
-WARNA_KATA_KHUSUS = "&HFFFFFF&"
+ACCENT_WORD_COLOR = "&HFFFFFF&"
 
 # 4. EXTERNAL ASSET SETTINGS
-NAMA_FONT_THUMBNAIL = "Montserrat-Black.ttf"
+THUMBNAIL_FONT_NAME = "Montserrat-Black.ttf"
 URL_FONT_THUMBNAIL = (
     "https://github.com/JulietaUla/Montserrat/raw/master/fonts/ttf/Montserrat-Black.ttf"
 )
@@ -218,13 +218,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--clips",
         "-n",
         type=int,
-        default=JUMLAH_CLIP,
+        default=CLIP_COUNT,
         help="Number of highlight clips to generate",
     )
     p.add_argument(
         "--ratio",
         "-r",
-        default=PILIHAN_RASIO,
+        default=ASPECT_RATIO,
         choices=["9:16", "16:9", "1:1", "3:4", "4:5"],
         help="Output aspect ratio",
     )
@@ -244,13 +244,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--words-per-sub",
         type=int,
-        default=MAX_KATA_PER_SUBTITLE,
+        default=MAX_WORDS_PER_SUBTITLE,
         help="Max words per karaoke subtitle group",
     )
     p.add_argument(
         "--hook-duration",
         type=int,
-        default=DURASI_HOOK,
+        default=HOOK_DURATION,
         help="Hook teaser duration in seconds",
     )
     p.add_argument(
@@ -356,7 +356,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # --- Subtitles & typography ---
     p.add_argument(
         "--font-style",
-        default=GAYA_FONT_AKTIF,
+        default=ACTIVE_FONT_STYLE,
         choices=["DEFAULT", "STORYTELLER", "HORMOZI", "CINEMATIC"],
         help="Font style preset",
     )
@@ -428,6 +428,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "--load-gemini-json",
         action="store_true",
         help="Load the saved gemini_response.json from outputs dir to bypass the AI generation step (useful for debugging)",
+    )
+    p.add_argument(
+        "--target-accounts",
+        default=None,
+        help="Path to the account routing JSON (default: target_accounts.json in the "
+        "working directory). Falls back to built-in defaults when the file is missing.",
+    )
+    p.add_argument(
+        "--no-account-routing",
+        action="store_true",
+        help="Skip target-account classification entirely; the AI then spends its "
+        "effort on clip selection and metadata only.",
     )
     p.add_argument(
         "--box-face-detection",
@@ -777,9 +789,9 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         base_dir=base_dir,
         outputs_dir=outputs_dir,
         font_dir=font_dir,
-        file_video_asli=os.path.abspath(os.path.join(base_dir, "video_asli.mp4")),
+        source_video_path=os.path.abspath(os.path.join(base_dir, "source_video.mp4")),
         file_font_thumbnail=os.path.abspath(
-            os.path.join(base_dir, NAMA_FONT_THUMBNAIL)
+            os.path.join(base_dir, THUMBNAIL_FONT_NAME)
         ),
         file_mediapipe_model=os.path.abspath(
             os.path.join(base_dir, "blaze_face_full_range.tflite")
@@ -798,13 +810,13 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         # Main settings
         source_platform="tiktok" if args.tiktok else args.source,
         url_youtube=args.url,
-        jumlah_clip=args.clips,
-        pilihan_rasio=args.ratio,
+        clip_count=args.clips,
+        aspect_ratio=args.ratio,
         download_source_height=args.source_height,
         render_output_height=args.render_height,
         # Content & hook
-        max_kata_per_subtitle=args.words_per_sub,
-        durasi_hook=args.hook_duration,
+        max_words_per_subtitle=args.words_per_sub,
+        hook_duration=args.hook_duration,
         hook_source=args.hook_source,
         hook_source_start=args.hook_source_start,
         # Hook V2 & Segment Trimming
@@ -831,20 +843,20 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         split_max_zoom=args.split_max_zoom,
         # Subtitles & typography
         no_subs=args.no_subs,
-        gaya_font_aktif=args.font_style,
-        daftar_font=DAFTAR_FONT,
+        active_font_style=args.font_style,
+        font_presets=FONT_PRESETS,
         use_advanced_text=args.advanced_text,
         use_advanced_text_on_hook=args.advanced_text_hook,
         # ASS position values
         ass_align_916=ASS_ALIGN_916,
         ass_margin_916=ASS_MARGIN_916,
         ass_font_916=ASS_FONT_916,
-        scale_kata_khusus_916=SCALE_KATA_KHUSUS_916,
+        accent_word_scale_916=ACCENT_WORD_SCALE_916,
         ass_align_169=ASS_ALIGN_169,
         ass_margin_169=ASS_MARGIN_169,
         ass_font_169=ASS_FONT_169,
-        scale_kata_khusus_169=SCALE_KATA_KHUSUS_169,
-        warna_kata_khusus=WARNA_KATA_KHUSUS,
+        accent_word_scale_169=ACCENT_WORD_SCALE_169,
+        accent_word_color=ACCENT_WORD_COLOR,
         # Asset URLs
         url_font_thumbnail=URL_FONT_THUMBNAIL,
         url_glitch_video=URL_GLITCH_VIDEO,
@@ -866,6 +878,10 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         gemini_model=args.gemini_model,
         gemini_fallback_model=args.gemini_fallback_model,
         load_gemini_json=args.load_gemini_json,
+        target_accounts_path=(
+            os.path.abspath(args.target_accounts) if args.target_accounts else None
+        ),
+        no_account_routing=args.no_account_routing,
         # Tracking Tuning
         track_step=args.track_step,
         track_deadzone=args.track_deadzone,

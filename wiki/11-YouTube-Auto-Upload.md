@@ -67,8 +67,8 @@ This will:
 ### Custom Scheduling
 
 ```bash
-# 12-hour intervals with Jakarta timezone
-python -m app.cli upload-youtube --interval-hours 12 --tz-name "Asia/Jakarta"
+# 12-hour intervals with India timezone
+python -m app.cli upload-youtube --interval-hours 12 --tz-name "Asia/Kolkata"
 
 # Test with only the first pending video
 python -m app.cli upload-youtube --test-mode
@@ -86,7 +86,7 @@ python -m app.cli upload-youtube --help
 Key flags: `--token-file` (default `.credentials/youtube_token.json`),
 `--manifest-file` (default `outputs/render_manifest.json`), `--result-file`,
 `--updated-manifest`, `--tz-name` (defaults to the `APP_TIMEZONE` env var, or
-`Asia/Makassar`), `--interval-hours` (default `24`), `--start-local`,
+`Asia/Kolkata`), `--interval-hours` (default `24`), `--start-local`,
 `--test-mode`, `--safety-config` (default `upload_safety.json`), and
 `--no-approval` to skip the manual confirmation prompt (⚠️ not recommended for
 a channel recovering from a strike). See the [CLI Arguments

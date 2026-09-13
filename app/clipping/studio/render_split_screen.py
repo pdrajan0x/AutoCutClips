@@ -53,7 +53,9 @@ def render_split_screen_video(
     DEADZONE_RATIO   = cfg.track_deadzone if cfg.track_deadzone is not None else 0.15
     SMOOTH_FACTOR    = cfg.track_smooth if cfg.track_smooth is not None else 0.30
     JITTER_THRESHOLD = cfg.track_jitter if cfg.track_jitter is not None else 5
-    SNAP_THRESHOLD   = cfg.track_snap if cfg.track_snap is not None else 0.25
+    # Fraction of the screen width a face must jump to count as a new person.
+    # Defaults to aggressive snapping; --track-snap overrides it.
+    SNAP_THRESHOLD   = cfg.track_snap if cfg.track_snap is not None else 0.08
     DIVIDER_HEIGHT = 4  # px, divider between panels
     INACTIVE_ALPHA = 0.15  # darkening for inactive speaker panel
     ACTIVE_BORDER = 3  # px, highlight border for active speaker
@@ -79,7 +81,7 @@ def render_split_screen_video(
     detector = None
     if cfg.face_detector == "yolo":
         if not os.path.exists(cfg.file_yolo_model):
-            print(f"   📥 Mendownload YOLOv8 Face Model ({cfg.yolo_size})...")
+            print(f"   📥 Downloading the YOLOv8 face model ({cfg.yolo_size})...")
             import urllib.request
 
             urllib.request.urlretrieve(cfg.url_yolo_model, cfg.file_yolo_model)
@@ -167,7 +169,7 @@ def render_split_screen_video(
         ranked = all_speakers_in_clip
         extra_speakers = []
 
-    # ---- FASE 1: DETECT ALL FACES & ASSIGN TO SPEAKERS (diarization-guided) ----
+    # ---- PHASE 1: DETECT ALL FACES & ASSIGN TO SPEAKERS (diarization-guided) ----
     # Strategy:
     #   1 active + 1 face  → trivial: face belongs to active speaker
     #   N active + N faces → sort faces by X; sort active speakers by label; assign in order
@@ -445,7 +447,7 @@ def render_split_screen_video(
                 raw_data[spk].append({"time": fd["time"], "cx": face[0], "cy": face[1], "dist": d_near})
 
     # ================================================================
-    # FASE 1.5 — Determine Stable Global Zoom
+    # PHASE 1.5 — Determine Stable Global Zoom
     # ================================================================
     global_min_dist = width
     for spk_list in raw_data.values():
@@ -533,7 +535,7 @@ def render_split_screen_video(
         med = _st_dbg.median([d["cx"] for d in raw_data[spk]]) if n_pts else 0
         print(f"      {spk}: {n_pts} pts, median_cx={med:.0f}, canonical={canon}, zoom={sz:.2f}x", flush=True)
 
-    # ---- FASE 2: SMOOTH CAMERA PER SPEAKER (Centering CX) ----
+    # ---- PHASE 2: SMOOTH CAMERA PER SPEAKER (Centering CX) ----
     def _smooth_positions(raw_list, spk_name):
         smooth_list = []
         if not raw_list:
@@ -558,9 +560,7 @@ def render_split_screen_video(
         # Snap if distance is > 4% of frame width (~75px). Crucial for instantly
         # jumping perfectly to center during angle cuts (wide to tight shot)
         # without slowly panning towards it.
-        temp_snap = SNAP_THRESHOLD if SNAP_THRESHOLD < 0.1 else 0.08
-        # temp_snap = SNAP_THRESHOLD if SNAP_THRESHOLD < 0.1 else 0.04
-        snap_px = width * temp_snap
+        snap_px = width * SNAP_THRESHOLD
 
         for d in raw_list:
             face_cx = d["cx"]
@@ -638,7 +638,7 @@ def render_split_screen_video(
                 return res
         return []
 
-    # ---- FASE 3: RENDER FRAMES ----
+    # ---- PHASE 3: RENDER FRAMES ----
     # Determine outputs needed
     writer_main = None
     writer_dev = None
@@ -673,7 +673,7 @@ def render_split_screen_video(
     prev_speaker_split = None  # the speaker before the switch, used to detect a transition
     is_new_switch_split = False  # True on the first frame after a switch
     SWITCH_BLEND_DUR = float(getattr(cfg, "switch_blend_duration", 0.0))
-    switch_blend_t0 = -1.0  # waktu mulai blending setelah switch
+    switch_blend_t0 = -1.0  # when blending starts after a switch
 
     def _resolve_switch_pos_split(speaker, t, is_new_switch):
         """Return (cx, cy) with anti-sliding cache + optional blend."""
@@ -703,6 +703,9 @@ def render_split_screen_video(
     # Stability window for layout decisions (Majority Vote of face counts)
     LAYOUT_SMOOTH_WINDOW = getattr(cfg, "track_smooth_window", 12)
     face_count_history = []
+    # Only assigned by the dynamic face-trigger path, but the dev-mode HUD reads
+    # it on every frame — seed it so --dev-mode works without --dynamic-split.
+    stable_count = 0
     # (MIN_HOLD is already initialized above)
     is_dynamic = getattr(cfg, "use_dynamic_split", False)
     
@@ -853,7 +856,7 @@ def render_split_screen_video(
                 spk = current_speaker or (speaker_top if speaker_top in ranked else ranked[0])
                 # Anti-sliding: resolve position with cache + optional blend
                 smooth_cx, smooth_cy = _resolve_switch_pos_split(spk, t, is_new_switch_split)
-                is_new_switch_split = False  # Reset flag setelah digunakan
+                is_new_switch_split = False  # Reset the flag once it has been used
                 # Calculate Top-Left X for full 9:16 crop
                 x_full = int(max(0, min(smooth_cx - crop_w_full / 2, width - crop_w_full)))
                 y_full = int(max(0, min(smooth_cy - crop_h_full / 2, height - crop_h_full)))

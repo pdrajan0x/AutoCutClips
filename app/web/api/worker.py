@@ -21,6 +21,9 @@ from .models import ClipDetail, JobStatus
 MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "1"))
 _semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 _executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS)
+# The event loop only holds weak references to tasks, so an in-flight job can be
+# garbage-collected mid-run unless we keep a strong reference ourselves.
+_background_tasks: set[asyncio.Task] = set()
 
 # Runtime settings overrides (API keys etc.) held in memory.
 _settings_env: dict[str, str] = {}
@@ -55,8 +58,8 @@ def _clip_details(job_id: str, render_manifest: list[dict]) -> list[ClipDetail]:
             ClipDetail(
                 rank=entry.get("rank", 0),
                 viral_score=entry.get("viral_score"),
-                title=entry.get("title_indonesia", ""),
-                title_en=entry.get("title_inggris", ""),
+                title=entry.get("title", ""),
+                title_en=entry.get("title", ""),
                 filename=filename,
                 duration=entry.get("duration"),
                 start_time=entry.get("start_time"),
@@ -96,14 +99,14 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
             return
 
         # An uploaded file replaces the download step; the config adapter already
-        # points file_video_asli at it, so only existence needs checking here.
-        if payload.get("upload_filename") and not os.path.exists(cfg.file_video_asli):
+        # points source_video_path at it, so only existence needs checking here.
+        if payload.get("upload_filename") and not os.path.exists(cfg.source_video_path):
             store.set_error(
                 job_id, f"Uploaded file not found: {payload['upload_filename']}"
             )
             return
 
-        if not cfg.url_youtube and not os.path.exists(cfg.file_video_asli):
+        if not cfg.url_youtube and not os.path.exists(cfg.source_video_path):
             store.set_error(
                 job_id,
                 "No source video for this job ID — the file may have been deleted.",
@@ -139,4 +142,6 @@ async def submit_job(job_id: str, payload: dict) -> None:
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(_executor, _run_pipeline_sync, job_id, payload)
 
-    asyncio.create_task(_run())
+    task = asyncio.create_task(_run())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)

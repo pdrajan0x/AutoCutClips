@@ -61,7 +61,7 @@ IG_CAPTION_MAX_CHARS = 2200
 CONTAINER_TIMEOUT_SECONDS = 300
 CONTAINER_POLL_INTERVAL = 10
 
-DEFAULT_TZ = "Asia/Makassar"
+DEFAULT_TZ = "Asia/Kolkata"
 
 
 # ==============================================================================

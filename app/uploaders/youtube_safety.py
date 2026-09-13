@@ -137,7 +137,7 @@ def prompt_manual_approval(item: dict, publish_at_local=None) -> bool:
     """Ask the operator to confirm one upload. Returns False on skip/abort."""
     title = (
         item.get("youtube_title_final")
-        or item.get("title_inggris")
+        or item.get("title")
         or f"Clip Rank {item.get('rank', '?')}"
     )
 

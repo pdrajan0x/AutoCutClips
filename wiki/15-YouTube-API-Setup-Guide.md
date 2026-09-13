@@ -288,7 +288,7 @@ python -m app.cli upload-youtube --test-mode
 ### Full upload with scheduling
 
 ```bash
-python -m app.cli upload-youtube --interval-hours 12 --tz-name "Asia/Jakarta"
+python -m app.cli upload-youtube --interval-hours 12 --tz-name "Asia/Kolkata"
 ```
 
 The uploader will:

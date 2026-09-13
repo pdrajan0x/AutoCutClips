@@ -73,17 +73,12 @@ def get_clip_title_and_description(item: dict, title_limit: int = 100) -> tuple[
     """
     Extract a publishable title and description from a manifest row.
 
-    Prefers the English YouTube fields, falling back to the Indonesian title.
+    Prefers the enriched YouTube fields, falling back to the raw clip title.
     """
     title = (
         item.get("youtube_title_final")
-        or item.get("title_inggris")
-        or item.get("title_indonesia")
+        or item.get("title")
         or f"Clip Rank {item.get('rank', '?')}"
     )
-    description = (
-        item.get("youtube_description_final")
-        or item.get("tiktok_caption_final")
-        or ""
-    )
+    description = item.get("youtube_description_final") or ""
     return normalize_text(title)[:title_limit], normalize_text(description)

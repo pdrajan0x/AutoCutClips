@@ -55,37 +55,34 @@ def process_clip(
     h_end = float(
         clip.get(
             "hook_end_time",
-            clip.get("hook_start_time", clip["start_time"]) + cfg.durasi_hook,
+            clip.get("hook_start_time", clip["start_time"]) + cfg.hook_duration,
         )
     )
     
     # Custom Hook Override
-    file_hook_src = cfg.file_video_asli
+    file_hook_src = cfg.source_video_path
     custom_hook = clip.get("custom_hook_info")
     if custom_hook:
         file_hook_src = custom_hook["file_path"]
         h_start = getattr(cfg, "hook_source_start", 0.0)
         
+        cap_h = cv2.VideoCapture(file_hook_src)
         try:
-            cap_h = cv2.VideoCapture(file_hook_src)
             fps = cap_h.get(cv2.CAP_PROP_FPS)
             frames = cap_h.get(cv2.CAP_PROP_FRAME_COUNT)
-            if fps > 0:
-                vid_duration = frames / fps
-            else:
-                vid_duration = float('inf')
+            vid_duration = frames / fps if fps > 0 else float("inf")
+        except cv2.error:
+            vid_duration = float("inf")
+        finally:
             cap_h.release()
-        except:
-            vid_duration = float('inf')
 
-        h_end = h_start + cfg.durasi_hook
+        h_end = h_start + cfg.hook_duration
         if h_end > vid_duration:
             h_end = vid_duration
     m_start = float(clip["start_time"])
     m_end = float(clip["end_time"])
-    title_id = clip.get("title_indonesia")
-    title_en = clip.get("title_inggris")
-    
+    title = clip.get("title")
+
     out_vid = os.path.join(cfg.outputs_dir, f"highlight_rank_{rank}_ready.mp4")
     if getattr(cfg, "dev_mode_with_output_merge", False):
         out_vid = os.path.join(cfg.outputs_dir, f"highlight_rank_{rank}_dev_mode_merge_ready.mp4")
@@ -93,10 +90,10 @@ def process_clip(
     out_thm = os.path.join(cfg.outputs_dir, f"thumbnail_rank_{rank}.jpg")
 
     # Read the source resolution so dev-mode can place subtitles correctly.
-    cap_asli = cv2.VideoCapture(cfg.file_video_asli)
-    sw = int(cap_asli.get(cv2.CAP_PROP_FRAME_WIDTH))
-    sh = int(cap_asli.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    cap_asli.release()
+    source_cap = cv2.VideoCapture(cfg.source_video_path)
+    sw = int(source_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    sh = int(source_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    source_cap.release()
     source_dim = (sw, sh)
 
     manifest_item = {
@@ -105,33 +102,28 @@ def process_clip(
         "ratio": ratio,
         "video_path": out_vid,
         "thumbnail_path": out_thm,
-        "thumbnail_text": title_en or title_id or f"Highlight {rank}",
+        "thumbnail_text": title or f"Highlight {rank}",
         "youtube_title_final": clip.get(
-            "youtube_title_final", clip.get("title_inggris", "")
+            "youtube_title_final", clip.get("title", "")
         ),
         "youtube_description_final": clip.get("youtube_description_final", ""),
         "youtube_tags_final": clip.get("youtube_tags_final", []),
-        "tiktok_caption_final": clip.get(
-            "tiktok_caption_final", clip.get("hastag", "")
-        ),
-        "title_indonesia": clip.get("title_indonesia", ""),
-        "title_inggris": clip.get("title_inggris", ""),
-        "hastag": clip.get("hastag", ""),
+        "title": clip.get("title", ""),
+        "hashtags": clip.get("hashtags", ""),
         "start_time": m_start,
         "end_time": m_end,
         "hook_start_time": h_start,
         "hook_end_time": h_end,
         "duration": round(m_end - m_start, 2),
-        "alasan": clip.get("alasan", ""),
+        "reason": clip.get("reason", ""),
         "broll_list": clip.get("broll_list", []),
         "typography_plan": clip.get("typography_plan", []),
     }
 
     print(f"\n{'=' * 70}")
     print(f"🔥 [Rank {rank}] Processing clip")
-    print(f"📝 [Title ID]     : '{clip.get('title_indonesia', '-')}'")
-    print(f"📝 [Title EN]     : '{clip.get('title_inggris', '-')}'")
-    print(f"#️⃣ [Hashtags]     : '{clip.get('hastag', '-')}'")
+    print(f"📝 [Title]        : '{clip.get('title', '-')}'")
+    print(f"#️⃣ [Hashtags]     : '{clip.get('hashtags', '-')}'")
     print(f"🧠 Active encoder : {video_encoder['name']}")
     print(f"{'=' * 70}")
 
@@ -149,6 +141,10 @@ def process_clip(
     dev_dual = getattr(cfg, "dev_mode_with_output", False)
     h_ts_dev = f"h_{rank}_dev.ts"
     m_ts_dev = f"m_{rank}_dev.ts"
+    # Must match how the renderers name their dev-visualisation output
+    # (see render_split_screen.py), or the dev pass re-encodes the normal
+    # render and the real dev file is orphaned on disk.
+    m_silent_dev = m_silent.replace(".ts", "_dev.ts").replace(".mp4", "_dev.mp4")
     
     hook_enabled = cfg.use_hook_glitch
 
@@ -175,7 +171,7 @@ def process_clip(
     )
 
     broll_list = clip.get("broll_list", [])
-    broll_aktif = []
+    active_broll = []
     if cfg.use_broll and broll_list:
         print(f"   🎥 Downloading {len(broll_list)} B-roll video(s) from Pexels...")
         for i, br in enumerate(broll_list):
@@ -184,7 +180,7 @@ def process_clip(
             if download_pexels_broll(q, ratio, file_broll, cfg.pexels_api_key):
                 br_copy = dict(br)
                 br_copy["filepath"] = file_broll
-                broll_aktif.append(br_copy)
+                active_broll.append(br_copy)
 
     std_p = get_ts_encode_args(video_encoder, fps=30)
 
@@ -334,7 +330,7 @@ def process_clip(
                     label=f"Rank {rank} Hook",
                 )
             
-            aktif_advanced_hook = cfg.use_advanced_text_on_hook
+            advanced_hook_enabled = cfg.use_advanced_text_on_hook
             if not cfg.no_subs and not custom_hook:
                 build_ass_file(
                     data_segments,
@@ -344,7 +340,7 @@ def process_clip(
                     ratio,
                     cfg,
                     typography_plan=typography_plan,
-                    use_advanced=aktif_advanced_hook,
+                    use_advanced=advanced_hook_enabled,
                     get_x_func=get_x_h,
                     source_dim=source_dim,
                 )
@@ -414,22 +410,22 @@ def process_clip(
                 # Render visual per segment
                 if use_split:
                     get_x_main = render_split_screen_video(
-                        cfg.file_video_asli, s_silent, s_start, s_end,
+                        cfg.source_video_path, s_silent, s_start, s_end,
                         ratio, diarization_data, cfg,
                         label=f"Rank {rank} Seg {idx} SplitScreen",
-                        broll_data=broll_aktif,
+                        broll_data=active_broll,
                     )
                 elif use_camera_switch:
                     get_x_main = render_camera_switch_video(
-                        cfg.file_video_asli, s_silent, s_start, s_end,
+                        cfg.source_video_path, s_silent, s_start, s_end,
                         ratio, diarization_data, cfg,
                         label=f"Rank {rank} Seg {idx} CameraSwitch",
-                        broll_data=broll_aktif,
+                        broll_data=active_broll,
                     )
                 else:
                     get_x_main = render_hybrid_video(
-                        cfg.file_video_asli, s_silent, s_start, s_end,
-                        ratio, cfg, broll_aktif,
+                        cfg.source_video_path, s_silent, s_start, s_end,
+                        ratio, cfg, active_broll,
                         label=f"Rank {rank} Seg {idx} Hybrid",
                     )
 
@@ -452,7 +448,7 @@ def process_clip(
                     "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
                     "-i", s_silent,
                     "-ss", str(s_start), "-to", str(s_end),
-                    "-i", cfg.file_video_asli,
+                    "-i", cfg.source_video_path,
                     "-map", "0:v:0", "-map", "1:a:0",
                 ]
                 if vf_seg_parts:
@@ -485,17 +481,17 @@ def process_clip(
 
             # Skip the standard MAIN render + subtitle/BGM encoding loop
             # and go directly to BGM application on the concatenated result
-            aktif_bgm = cfg.use_auto_bgm
+            bgm_enabled = cfg.use_auto_bgm
             bgm_mood = clip.get("bgm_mood", "chill")
             if bgm_mood not in getattr(cfg, "bgm_moods", ["chill"]):
                 bgm_mood = "chill"
             
             file_bgm = None
-            if aktif_bgm:
-                print(f"   🎵 Mencari file BGM lokal (Mood: {bgm_mood})...")
+            if bgm_enabled:
+                print(f"   🎵 Looking for a local BGM file (mood: {bgm_mood})...")
                 file_bgm = get_local_bgm_file(bgm_mood, getattr(cfg, "bgm_dir", os.path.join(cfg.base_dir, "assets", "bgm")))
                 if not file_bgm and bgm_mood != "chill":
-                    print("   🔄 Fallback mencari BGM chill...")
+                    print("   🔄 Falling back to the chill BGM...")
                     file_bgm = get_local_bgm_file("chill", getattr(cfg, "bgm_dir", os.path.join(cfg.base_dir, "assets", "bgm")))
                 
                 if file_bgm:
@@ -503,7 +499,7 @@ def process_clip(
                 else:
                     print("   ⚠️ The BGM folder is empty or has no mp3 files. Rendering without BGM.")
 
-            if aktif_bgm and file_bgm:
+            if bgm_enabled and file_bgm:
                 print("   🎵 Applying BGM to segmented clip...")
                 m_ts_bgm = f"m_bgm_{rank}.ts"
                 seg_total_dur = sum(float(s["end_time"]) - float(s["start_time"]) for s in keep_segments)
@@ -531,7 +527,7 @@ def process_clip(
             if use_split:
                 print("   📸 [Main] Split-screen render (Visual)...")
                 get_x_main = render_split_screen_video(
-                    cfg.file_video_asli,
+                    cfg.source_video_path,
                     m_silent,
                     m_start,
                     m_end,
@@ -539,13 +535,13 @@ def process_clip(
                     diarization_data,
                     cfg,
                     label=f"Rank {rank} Main SplitScreen",
-                    broll_data=broll_aktif,
+                    broll_data=active_broll,
                 )
             elif use_camera_switch:
                 # Note: Camera Switch doesn't currently support dev_mode frames but we pass it anyway
                 print("   📸 [Main] Camera switch render (Visual)...")
                 get_x_main = render_camera_switch_video(
-                    cfg.file_video_asli,
+                    cfg.source_video_path,
                     m_silent,
                     m_start,
                     m_end,
@@ -553,18 +549,18 @@ def process_clip(
                     diarization_data,
                     cfg,
                     label=f"Rank {rank} Main CameraSwitch",
-                    broll_data=broll_aktif,
+                    broll_data=active_broll,
                 )
             else:
                 print("   📸 [Main] Hybrid render (Visual)...")
                 get_x_main = render_hybrid_video(
-                    cfg.file_video_asli,
+                    cfg.source_video_path,
                     m_silent,
                     m_start,
                     m_end,
                     ratio,
                     cfg,
-                    broll_aktif,
+                    active_broll,
                     label=f"Rank {rank} Main",
                 )
 
@@ -589,17 +585,17 @@ def process_clip(
             esc_fontsdir = escape_ffmpeg_filter_value(os.path.abspath(cfg.font_dir))
 
             # SMART BGM
-            aktif_bgm = cfg.use_auto_bgm
+            bgm_enabled = cfg.use_auto_bgm
             bgm_mood = clip.get("bgm_mood", "chill")
             if bgm_mood not in getattr(cfg, "bgm_moods", ["chill"]):
                 bgm_mood = "chill"
                 
             file_bgm = None
-            if aktif_bgm:
-                print(f"   🎵 Mencari file BGM lokal (Mood: {bgm_mood})...")
+            if bgm_enabled:
+                print(f"   🎵 Looking for a local BGM file (mood: {bgm_mood})...")
                 file_bgm = get_local_bgm_file(bgm_mood, getattr(cfg, "bgm_dir", os.path.join(cfg.base_dir, "assets", "bgm")))
                 if not file_bgm and bgm_mood != "chill":
-                    print("   🔄 Fallback mencari BGM chill...")
+                    print("   🔄 Falling back to the chill BGM...")
                     file_bgm = get_local_bgm_file("chill", getattr(cfg, "bgm_dir", os.path.join(cfg.base_dir, "assets", "bgm")))
                 
                 if file_bgm:
@@ -608,7 +604,7 @@ def process_clip(
                     print("   ⚠️ The BGM folder is empty or has no mp3 files. Rendering without BGM.")
 
             # --- Subtitle & BGM Encoding Loop (Handles dual output files if needed) ---
-            runs = [m_silent] if not dev_dual else [m_silent, m_silent.replace(".ts", "_dev.ts")]
+            runs = [m_silent] if not dev_dual else [m_silent, m_silent_dev]
             out_targets = [m_ts] if not dev_dual else [m_ts, m_ts_dev]
             
             for input_silent_ts, output_final_ts in zip(runs, out_targets):
@@ -625,13 +621,13 @@ def process_clip(
                     "ffmpeg", "-hide_banner", "-loglevel", "verbose", "-y",
                     "-i", input_silent_ts,
                     "-ss", str(m_start), "-to", str(m_end),
-                    "-i", cfg.file_video_asli
+                    "-i", cfg.source_video_path
                 ]
 
                 # Map inputs
                 input_idx_bgm = -1
                 
-                if aktif_bgm and file_bgm:
+                if bgm_enabled and file_bgm:
                     cmd_m_base.extend(["-stream_loop", "-1", "-i", file_bgm])
                     input_idx_bgm = 2
                     
@@ -678,7 +674,7 @@ def process_clip(
             try:
                 subprocess.run([
                     "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                    "-ss", str(m_start), "-i", cfg.file_video_asli,
+                    "-ss", str(m_start), "-i", cfg.source_video_path,
                     "-vframes", "1", "-q:v", "2", frame_path
                 ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
             except subprocess.CalledProcessError as e:
@@ -778,18 +774,18 @@ def process_clip(
                 wave_lowpass = 300      # 250-400 works well for voice-over
                 wave_use_lowpass = True
                 
-                # Tampilan
-                wave_mode = "cline"     # cline lebih halus, line lebih tegas
+                # Appearance
+                wave_mode = "cline"     # cline is smoother, line is sharper
                 wave_color = "0x00FFFF"
                 wave_scale = "sqrt"     # sqrt is calmer than linear
-                # Alternatif scale:
+                # Alternative scales:
                 # "lin"  = linear/default: truest waveform, but can look busy/aggressive
                 # "sqrt" = smoother and more balanced, a good fit for voice-over
                 # "cbrt" = softer still than sqrt, for when the waveform is too busy
                 # "log"  = small details stand out more, but can end up looking busy
                 
                 
-                # Transparansi wave
+                # Waveform transparency
                 wave_alpha = 0.65       # 0.4-0.8; lower is softer
                 
                 # Waveform overlay position.
@@ -856,7 +852,7 @@ def process_clip(
                 
                 # Audio mixing with BGM for VO intro
                 # Input indices: 0=frame, 1=audio, 2=glow, 3=bgm (if present)
-                if aktif_bgm and file_bgm:
+                if bgm_enabled and file_bgm:
                     cmd_vo_base.extend(["-stream_loop", "-1", "-i", file_bgm])
                     bgm_vol = cfg.bgm_base_volume
                     vo_vol = getattr(cfg, "voiceover_volume", 1.0)
@@ -1016,7 +1012,7 @@ def process_clip(
                     if os.path.exists(glow_full_path):
                         os.remove(glow_full_path)
 
-        thumbnail_title = title_en or title_id or f"Highlight {rank}"
+        thumbnail_title = title or f"Highlight {rank}"
         build_thumbnail(out_vid, out_thm, thumbnail_title, cfg)
 
         manifest_item["status"] = "success"
@@ -1035,7 +1031,7 @@ def process_clip(
         return manifest_item
 
     except Exception as e:
-        print(f"\n❌ ERROR: Kegagalan tak terduga. Error: {e}")
+        print(f"\n❌ ERROR: Unexpected failure. Error: {e}")
         manifest_item["status"] = "failed"
         manifest_item["error"] = str(e)
         manifest_item["video_exists"] = os.path.exists(out_vid)
@@ -1045,9 +1041,21 @@ def process_clip(
     finally:
         files_to_remove = [h_ts, m_ts, a_hook, a_main, h_silent, m_silent]
         if dev_dual:
-            files_to_remove.extend([h_ts_dev, m_ts_dev, m_silent.replace(".ts", "_dev.ts")])
-            
-        for br in broll_aktif:
+            files_to_remove.extend([h_ts_dev, m_ts_dev, m_silent_dev])
+
+        # Voice-over intermediates. Rebuilt from rank rather than read from the
+        # locals above, which stay unbound if we fail before the VO step.
+        files_to_remove.extend(
+            os.path.join(cfg.outputs_dir, name)
+            for name in (
+                f"vo_intro_{rank}.ts",
+                f"vo_intro_{rank}_dev.ts",
+                f"vo_subs_{rank}.ass",
+                f"vo_bg_{rank}.jpg",
+            )
+        )
+
+        for br in active_broll:
             files_to_remove.append(br["filepath"])
 
         for f_path in files_to_remove:
