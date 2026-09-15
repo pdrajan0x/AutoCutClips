@@ -438,7 +438,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--use-dlp-subs",
         action="store_true",
-        help="Use yt-dlp to download auto/manual subtitles to speed up process (skipping Whisper if found)",
+        help="Also fetch YouTube's own subtitles and have Gemini merge them with the "
+        "Whisper transcript before clip selection (improves accuracy on lyrics/jargon "
+        "Whisper mishears; word timing for rendering still comes from Whisper).",
     )
     p.add_argument(
         "--whisper-model", default=WHISPER_MODEL, help="Faster-Whisper model size"

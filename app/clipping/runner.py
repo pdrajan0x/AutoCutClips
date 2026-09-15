@@ -146,37 +146,47 @@ def _transcribe(cfg, progress: Progress) -> tuple[str, list[dict]]:
         progress("transcribe", 2, "Reusing the saved transcript.", 35.0)
         return cached.get("transcript", ""), cached["segments"]
 
-    transcript, segments = "", []
     source_platform = getattr(cfg, "source_platform", "youtube")
 
+    # YouTube's own captions, parsed if --use-dlp-subs is set and they exist.
+    # Word-level timing has the same shape as Whisper's, but is kept aside —
+    # Whisper's audio-aligned timing is what rendering/snapping uses below.
+    youtube_transcript, youtube_segments = "", []
     if source_platform == "youtube" and getattr(cfg, "use_dlp_subs", False):
         # The subtitle language suffix is unknown (.hi-orig.json3 / .en.json3), so glob.
         json3_files = glob.glob(cfg.source_video_path.replace(".mp4", ".*.json3"))
         if json3_files and os.path.exists(json3_files[0]):
-            transcript, segments = engine.parse_youtube_json3_subs(
+            youtube_transcript, youtube_segments = engine.parse_youtube_json3_subs(
                 json3_files[0], max_words_per_subtitle=cfg.max_words_per_subtitle
             )
-            if transcript and segments:
+            if youtube_transcript and youtube_segments:
                 # source_video.hi-orig.json3 -> "hi"
                 track = os.path.basename(json3_files[0]).split(".")[-2]
                 cfg.transcript_language = track.split("-")[0].lower()
-                print(
-                    f"✅ Parsed subtitles from YouTube "
-                    f"({os.path.basename(json3_files[0])}); skipping Whisper."
-                )
+                print(f"✅ Parsed subtitles from YouTube ({os.path.basename(json3_files[0])}).")
 
-    if not transcript or not segments:
-        whisper_info: dict = {}
-        transcript, segments = engine.transcribe_video(
-            cfg.source_video_path,
-            max_words_per_subtitle=cfg.max_words_per_subtitle,
-            model_size=cfg.whisper_model,
-            device=cfg.whisper_device,
-            compute_type=cfg.whisper_compute_type,
-            language=_whisper_language(cfg),
-            info_out=whisper_info,
-        )
-        cfg.transcript_language = whisper_info.get("language")
+    whisper_info: dict = {}
+    transcript, segments = engine.transcribe_video(
+        cfg.source_video_path,
+        max_words_per_subtitle=cfg.max_words_per_subtitle,
+        model_size=cfg.whisper_model,
+        device=cfg.whisper_device,
+        compute_type=cfg.whisper_compute_type,
+        language=_whisper_language(cfg),
+        info_out=whisper_info,
+    )
+    cfg.transcript_language = whisper_info.get("language") or cfg.transcript_language
+
+    if youtube_transcript and transcript:
+        # Both sources exist: let Gemini reconcile wording/gaps between them.
+        # The merged text only feeds clip *selection* — segments (word timing
+        # for rendering/snapping) stay Whisper's, since those are the ones
+        # actually aligned to this file's audio.
+        transcript = engine.merge_transcripts_with_ai(transcript, youtube_transcript, cfg)
+    elif youtube_transcript and not transcript:
+        # Whisper found nothing (e.g. VAD wiped out sung vocals) — the YouTube
+        # captions are all there is; use their timing too since Whisper has none.
+        transcript, segments = youtube_transcript, youtube_segments
 
     # Saved before captions are romanised, so a rerun starts from the real transcript.
     with open(cache_path, "w", encoding="utf-8") as f:
@@ -368,6 +378,13 @@ def run_pipeline(cfg, on_progress=None) -> list[dict]:
         clips, min_duration=min_duration, max_duration=max_duration
     )
     clips = metadata.snap_clips_to_words(clips, segments, min_duration=min_duration)
+    if not clips:
+        raise RuntimeError(
+            "No clips survived validation — every AI-picked moment was dropped "
+            f"(too short for --min-duration {min_duration:g}s, invalid timings, or "
+            "duplicates). Try lowering --min-duration or re-running; the AI response "
+            "was still saved to gemini_response.json for --load-gemini-json."
+        )
     if getattr(cfg, "caption_script", "latin") == "latin":
         # Hindi/Tamil/Arabic/... speech keeps its language but is written in
         # English letters ("mera naam ... hai"); Latin-script speech is untouched.
@@ -428,6 +445,11 @@ def run_pipeline(cfg, on_progress=None) -> list[dict]:
     manifest_path = os.path.join(cfg.outputs_dir, "render_manifest.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(render_manifest, f, ensure_ascii=False, indent=2)
+
+    succeeded = [r for r in render_manifest if r.get("status") == "success"]
+    if render_manifest and not succeeded:
+        errors = "; ".join(f"rank {r.get('rank')}: {r.get('error')}" for r in render_manifest)
+        raise RuntimeError(f"Every clip failed to render — {errors}")
 
     progress(
         "done", 7,

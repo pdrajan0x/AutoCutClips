@@ -216,53 +216,80 @@ def transcribe_video(
         except ImportError:
             pass
 
-    segments, info = model.transcribe(
-        video_path,
-        language=language,
-        task="transcribe",  # never "translate": captions stay in the spoken language
-        beam_size=5,
-        word_timestamps=True,
-        vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 500},
-        condition_on_previous_text=False,
-    )
-    print(
-        f"      🌐 Language: {info.language}"
-        + ("" if language else f" (auto-detected, {info.language_probability:.0%} confidence)"),
-        flush=True,
-    )
-    if info_out is not None:
-        info_out["language"] = info.language
+    def _run(use_vad: bool):
+        # threshold lower than Silero's 0.5 default catches quieter/sung vocals
+        # that read as background music rather than speech at the default.
+        vad_params = (
+            {"min_silence_duration_ms": 500, "threshold": 0.35, "speech_pad_ms": 300}
+            if use_vad else None
+        )
+        segments, info = model.transcribe(
+            video_path,
+            language=language,
+            task="transcribe",  # never "translate": captions stay in the spoken language
+            beam_size=5,
+            word_timestamps=True,
+            vad_filter=use_vad,
+            vad_parameters=vad_params,
+            condition_on_previous_text=False,
+        )
+        print(
+            f"      🌐 Language: {info.language}"
+            + ("" if language else f" (auto-detected, {info.language_probability:.0%} confidence)"),
+            flush=True,
+        )
+        if info_out is not None:
+            info_out["language"] = info.language
 
-    transcript = ""
-    data_segments: list[dict] = []
+        transcript = ""
+        data_segments: list[dict] = []
 
-    # Progress is tracked against audio timestamps: faster-whisper streams
-    # segments lazily, so the bar advances to each segment's end time.
-    total_dur = round(info.duration, 2)
-    progress = tqdm(
-        total=total_dur,
-        unit="s",
-        desc="      Transcription",
-        bar_format="{desc}: {percentage:3.0f}%|{bar}| {n:.0f}/{total:.0f}s [{elapsed}<{remaining}]",
-    )
+        # Progress is tracked against audio timestamps: faster-whisper streams
+        # segments lazily, so the bar advances to each segment's end time.
+        total_dur = round(info.duration, 2)
+        progress = tqdm(
+            total=total_dur,
+            unit="s",
+            desc="      Transcription",
+            bar_format="{desc}: {percentage:3.0f}%|{bar}| {n:.0f}/{total:.0f}s [{elapsed}<{remaining}]",
+        )
 
-    for segment in segments:
-        # Clamp so floating-point drift past the duration does not overshoot.
-        progress.update(min(segment.end, total_dur) - progress.n)
-        transcript += f"[{segment.start:.1f} - {segment.end:.1f}] {segment.text}\n"
+        for segment in segments:
+            # Clamp so floating-point drift past the duration does not overshoot.
+            progress.update(min(segment.end, total_dur) - progress.n)
+            transcript += f"[{segment.start:.1f} - {segment.end:.1f}] {segment.text}\n"
 
-        words = [w for w in (segment.words or []) if w.word.strip()]
-        chunk: list[dict] = []
-        for i, w in enumerate(words):
-            chunk.append({"word": w.word.strip(), "start": w.start, "end": w.end})
-            next_start = words[i + 1].start if i + 1 < len(words) else None
-            if _caption_break(chunk, next_start, max_words_per_subtitle):
-                data_segments.append(
-                    {"start": chunk[0]["start"], "end": chunk[-1]["end"], "words": chunk}
-                )
-                chunk = []
+            words = [w for w in (segment.words or []) if w.word.strip()]
+            chunk: list[dict] = []
+            for i, w in enumerate(words):
+                chunk.append({"word": w.word.strip(), "start": w.start, "end": w.end})
+                next_start = words[i + 1].start if i + 1 < len(words) else None
+                if _caption_break(chunk, next_start, max_words_per_subtitle):
+                    data_segments.append(
+                        {"start": chunk[0]["start"], "end": chunk[-1]["end"], "words": chunk}
+                    )
+                    chunk = []
 
-    progress.update(total_dur - progress.n)  # snap to 100% when done
-    progress.close()
+        progress.update(total_dur - progress.n)  # snap to 100% when done
+        progress.close()
+        covered = sum(seg["end"] - seg["start"] for seg in data_segments)
+        coverage = covered / total_dur if total_dur > 0 else 1.0
+        return transcript, data_segments, coverage
+
+    transcript, data_segments, coverage = _run(use_vad=True)
+
+    # Silero VAD is tuned for spoken conversation and can misjudge sung vocals
+    # over music as "non-speech", discarding some or all of the audio. A near-
+    # empty result (not just a totally empty one) is still a red flag, so
+    # retry once without VAD rather than transcribing a fraction of the video.
+    if coverage < 0.15:
+        print(
+            f"      ⚠️ Voice-activity filtering only kept {coverage:.0%} of the audio "
+            "as speech (common for singing/music) — retrying without it...",
+            flush=True,
+        )
+        transcript_retry, data_segments_retry, coverage_retry = _run(use_vad=False)
+        if coverage_retry > coverage:
+            transcript, data_segments = transcript_retry, data_segments_retry
+
     return transcript, data_segments

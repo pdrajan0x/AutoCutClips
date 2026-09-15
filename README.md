@@ -278,7 +278,7 @@ python -m app.cli --help
 | `--watermark-scale` | `15` | Watermark image height as % of frame height (1-100) |
 | `--no-subs` | — | Disable all subtitle rendering |
 | `--no-karaoke` | — | No spoken-word highlight |
-| `--use-dlp-subs` | — | Use YouTube's subtitles in the spoken language (skips Whisper if found) |
+| `--use-dlp-subs` | — | Also fetch YouTube's subtitles and have Gemini merge them with the Whisper transcript before clip selection (improves accuracy on lyrics/jargon; rendering timing still comes from Whisper) |
 | `--face-detector` | `mediapipe` | AI model for face tracking (`mediapipe` or `yolo`) |
 | `--static-crop` | `False` | Disable face tracking and use static center crop for `1:1`, `3:4`, and `4:5` formats |
 | `--yolo-size` | `8m` | YOLO face track model (`8n`, `8s`, `8m`, `8n_v2`, `9c`) |

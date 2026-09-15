@@ -313,6 +313,73 @@ def analyze_with_gemini(transcript: str, cfg) -> list[dict]:
     return _unwrap_clip_list(parsed, "Gemini")
 
 
+def merge_transcripts_with_ai(whisper_transcript: str, youtube_transcript: str, cfg) -> str:
+    """
+    Ask Gemini to reconcile the Whisper transcript with YouTube's own captions
+    into one clean, more accurate transcript.
+
+    Whisper sometimes mishears lyrics/jargon; YouTube's captions (creator-
+    uploaded or auto-generated) sometimes miss lines VAD or ASR dropped, or use
+    different line breaks. Merging plays each source's strengths against the
+    other's timestamps rather than trusting either one alone. Word-level
+    timing used for rendering still comes from Whisper's own segments — this
+    only improves the text Gemini reasons over when picking clips.
+    """
+    import google.genai as genai
+    from google.genai import types
+
+    print("[3/4] Merging the Whisper transcript with YouTube's captions...")
+
+    client = genai.Client(
+        api_key=cfg.api_key_gemini,
+        http_options=types.HttpOptions(
+            timeout=REQUEST_TIMEOUT_MS,
+            retry_options=types.HttpRetryOptions(attempts=1),
+        ),
+    )
+
+    prompt = (
+        "You are given two independent transcripts of the SAME video, each with "
+        "[start - end] timestamps in seconds. One is from an ASR model (Whisper), "
+        "the other is YouTube's own captions. They can disagree on wording, have "
+        "different line breaks, or one can be missing lines the other has.\n\n"
+        "Produce ONE merged transcript that is the most accurate reading of what "
+        "is actually said/sung, keeping the same '[start - end] text' line format "
+        "and the Whisper timestamps as the timing backbone (do not invent new "
+        "timestamps). Prefer whichever source's wording is clearer or more "
+        "complete for each line; if a line appears in only one source, keep it. "
+        "Do not add commentary, only the merged transcript text.\n\n"
+        f"=== WHISPER TRANSCRIPT ===\n{whisper_transcript}\n\n"
+        f"=== YOUTUBE CAPTIONS ===\n{youtube_transcript}\n"
+    )
+
+    schema = {
+        "type": "OBJECT",
+        "properties": {"merged_transcript": {"type": "STRING"}},
+        "required": ["merged_transcript"],
+    }
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=schema,
+    )
+
+    try:
+        parsed = _generate_json_with_retry(
+            client=client,
+            model=cfg.gemini_model,
+            fallback_model=getattr(cfg, "gemini_fallback_model", None),
+            contents=prompt,
+            config=config,
+        )
+        merged = parsed.get("merged_transcript") if isinstance(parsed, dict) else None
+        if merged and merged.strip():
+            return merged
+    except Exception as e:
+        print(f"⚠️ Transcript merge failed ({e}); falling back to the Whisper transcript alone.")
+
+    return whisper_transcript
+
+
 def analyze_with_ai(transcript: str, cfg) -> list[dict]:
     """Dispatch to the configured AI provider, falling back to Gemini."""
     if getattr(cfg, "ai_provider", "gemini") == "nvidia":
