@@ -167,6 +167,26 @@ def transcribe_video(
 
     print("[2/3] Starting transcription with Faster-Whisper (per-word level)...")
 
+    if device in ("cuda", "auto"):
+        try:
+            import torch
+            gpu_ok = torch.cuda.is_available()
+        except ImportError:
+            gpu_ok = False
+
+        if device == "auto":
+            device = "cuda" if gpu_ok else "cpu"
+        elif device == "cuda" and not gpu_ok:
+            print(
+                "      ⚠️ CUDA requested but no GPU is available — falling back to CPU. "
+                "This run will be slower.",
+                flush=True,
+            )
+            device = "cpu"
+            if compute_type == "float16":
+                # float16 needs a GPU; int8 is the safe/fast default on CPU.
+                compute_type = "int8"
+
     # faster-whisper is silent until the first segment is produced, so announce
     # each phase — otherwise a first CPU run (model download + full audio
     # decode) looks like a hang.

@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Upload — OSC Studio</title>
+    <meta name="description" content="Log in with YouTube and publish rendered clips — AutoCutClips Studio">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'], display: ['Outfit', 'sans-serif'] },
+                    colors: {
+                        brand: { 50: '#f5f3ff', 100: '#ede9fe', 200: '#ddd6fe', 400: '#a78bfa', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca', 900: '#312e81' }
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="studio.css">
+    <script>if (localStorage.getItem('theme') === 'dark') document.documentElement.classList.add('dark');</script>
+</head>
+
+<body class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 font-sans transition-colors duration-300">
+
+    <div id="mobile-overlay" class="mobile-overlay hidden" onclick="closeSidebar()"></div>
+
+    <div class="studio-layout">
+        <!-- Sidebar -->
+        <aside id="sidebar" class="studio-sidebar">
+            <div class="sidebar-brand">
+                <a href="../index.html" class="flex items-center gap-2 group mb-2">
+                    <div class="p-1.5 rounded-lg bg-brand-600 text-white group-hover:scale-105 transition-transform shadow-md shadow-brand-500/20">
+                        <i data-lucide="scissors" class="w-4 h-4"></i>
+                    </div>
+                    <span class="font-display font-bold text-sm bg-gradient-to-r from-brand-600 to-indigo-500 dark:from-brand-400 dark:to-sky-400 bg-clip-text text-transparent">
+                        AutoCutClips
+                    </span>
+                </a>
+                <h2 class="font-display font-bold text-lg text-slate-900 dark:text-white">🎬 Studio</h2>
+                <p class="text-xs text-slate-400 dark:text-slate-500">AI Auto-Clipper · Remote GPU</p>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="index.html" class="sidebar-link"><i data-lucide="layout-dashboard" class="nav-icon"></i> Dashboard</a>
+                <a href="new-job.html" class="sidebar-link"><i data-lucide="plus-circle" class="nav-icon"></i> New Job</a>
+                <a href="youtube.html" class="sidebar-link active"><i data-lucide="youtube" class="nav-icon"></i> YouTube Upload</a>
+                <a href="settings.html" class="sidebar-link"><i data-lucide="settings" class="nav-icon"></i> Settings</a>
+            </nav>
+            <div class="connect-panel">
+                <div class="flex items-center gap-2 mb-2">
+                    <span id="connect-dot" class="connect-dot offline"></span>
+                    <span id="connect-label" class="text-xs text-slate-500 dark:text-slate-400 truncate flex-1">Not connected</span>
+                </div>
+                <div class="flex gap-2 w-full">
+                    <button id="connect-btn" onclick="showConnectModal()" class="flex-1 text-xs font-medium px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-300">
+                        Connect
+                    </button>
+                    <button id="sidebar-stop-btn" onclick="stopBackendServer()" class="hidden w-10 flex items-center justify-center text-xs font-medium rounded-lg border border-red-500 bg-red-600 hover:bg-red-700 text-white transition-colors" title="Stop Kaggle Server">
+                        <i data-lucide="power" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+                <button onclick="toggleTheme()" class="w-full mt-2 text-xs font-medium px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-300 flex items-center justify-center gap-2">
+                    <span class="dark:hidden"><i data-lucide="moon" class="w-3.5 h-3.5"></i></span>
+                    <span class="hidden dark:inline"><i data-lucide="sun" class="w-3.5 h-3.5"></i></span>
+                    <span class="dark:hidden">Dark Mode</span><span class="hidden dark:inline">Light Mode</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="studio-main">
+            <div class="md:hidden sticky top-0 z-30 flex items-center gap-3 px-4 h-14 bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80">
+                <button onclick="toggleSidebar()" class="mobile-toggle p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"><i data-lucide="menu" class="w-5 h-5"></i></button>
+                <span class="font-display font-bold text-sm">📺 YouTube Upload</span>
+            </div>
+
+            <div class="max-w-3xl mx-auto px-4 sm:px-6 py-8 fade-in">
+                <!-- Page Header -->
+                <div class="mb-8">
+                    <h1 class="font-display font-bold text-2xl sm:text-3xl text-slate-900 dark:text-white">YouTube Upload</h1>
+                    <p class="text-slate-500 dark:text-slate-400 text-sm mt-1">Log in once, then publish rendered clips straight from the Studio</p>
+                </div>
+
+                <!-- Not Connected to backend -->
+                <div id="no-backend-state" class="hidden text-center py-16">
+                    <div class="text-5xl mb-4">🔌</div>
+                    <h3 class="font-display font-semibold text-lg text-slate-900 dark:text-white mb-2">Backend Not Connected</h3>
+                    <p class="text-sm text-slate-500 dark:text-slate-400 mb-6 max-w-sm mx-auto">Connect to your Kaggle/Colab backend first.</p>
+                    <button onclick="showConnectModal()" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-600 text-white font-medium text-sm hover:bg-brand-700 transition-colors shadow-lg shadow-brand-500/20">
+                        <i data-lucide="plug" class="w-4 h-4"></i> Connect
+                    </button>
+                </div>
+
+                <div id="page-content" class="hidden">
+
+                    <!-- Step 1: Client Secret -->
+                    <div id="card-client-secret" class="glass-card p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm mb-6">
+                        <h3 class="font-display font-semibold text-base text-slate-900 dark:text-white mb-2 flex items-center gap-2">
+                            <i data-lucide="file-key" class="w-5 h-5 text-brand-500"></i> 1. Google OAuth Client
+                        </h3>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                            One-time setup. In Google Cloud Console: <b>APIs & Services → Credentials → Create OAuth client ID → Desktop app</b>,
+                            download the JSON, and paste its full contents below. This only needs to be done once per account —
+                            it is stored on the backend, not in your browser.
+                        </p>
+                        <textarea id="input-client-secret" rows="4" placeholder='{"installed":{"client_id":"...","client_secret":"...","...":"..."}}'
+                            class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-500/50 placeholder-slate-400 text-slate-900 dark:text-white"></textarea>
+                        <div class="flex items-center gap-3 mt-3">
+                            <button onclick="saveClientSecret()" id="save-secret-btn" class="px-4 py-2 rounded-lg bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 transition-colors">
+                                Save Client
+                            </button>
+                            <span id="client-secret-status" class="text-xs text-slate-400"></span>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Login -->
+                    <div id="card-login" class="glass-card p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm mb-6">
+                        <h3 class="font-display font-semibold text-base text-slate-900 dark:text-white mb-2 flex items-center gap-2">
+                            <i data-lucide="log-in" class="w-5 h-5 text-brand-500"></i> 2. Log In With YouTube
+                        </h3>
+
+                        <div id="connected-panel" class="hidden">
+                            <div class="flex items-center gap-3 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/40 mb-3">
+                                <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-500 flex-shrink-0"></i>
+                                <div class="text-sm">
+                                    <span class="font-semibold text-emerald-700 dark:text-emerald-400" id="connected-channel-name">Connected</span>
+                                    <p class="text-xs text-emerald-600/80 dark:text-emerald-400/70">Login is saved — you won't need to repeat this unless you disconnect.</p>
+                                </div>
+                            </div>
+                            <button onclick="disconnectYoutube()" class="px-3 py-2 rounded-lg border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 text-xs font-medium hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors">
+                                Disconnect Account
+                            </button>
+                        </div>
+
+                        <div id="login-panel">
+                            <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                                Since the backend runs headless (Kaggle/Colab), login works via a link: open it, approve access,
+                                then paste back the address the browser lands on (it will show "can't be reached" — that's expected).
+                            </p>
+                            <button onclick="getLoginLink()" id="get-link-btn" class="px-4 py-2 rounded-lg bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 transition-colors mb-3">
+                                Get Login Link
+                            </button>
+                            <div id="login-link-box" class="hidden mb-3">
+                                <a id="login-link-anchor" href="#" target="_blank" rel="noopener"
+                                    class="block px-4 py-3 rounded-xl border border-brand-200 dark:border-brand-900/50 bg-brand-50 dark:bg-brand-950/30 text-brand-700 dark:text-brand-400 text-xs font-mono break-all hover:underline">
+                                </a>
+                            </div>
+                            <div id="paste-back-box" class="hidden">
+                                <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Paste the redirected URL (or just the code)</label>
+                                <div class="flex gap-2">
+                                    <input id="input-auth-code" type="text" placeholder="http://localhost:1/?code=..."
+                                        class="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-900 dark:text-white">
+                                    <button onclick="exchangeAuthCode()" id="exchange-btn" class="px-4 py-2 rounded-lg bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 transition-colors">
+                                        Finish Login
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="login-status-msg" class="text-xs mt-3 hidden"></div>
+                    </div>
+
+                    <!-- Step 3: Upload -->
+                    <div id="card-upload" class="glass-card p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm mb-6">
+                        <h3 class="font-display font-semibold text-base text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+                            <i data-lucide="upload-cloud" class="w-5 h-5 text-brand-500"></i> 3. Publish Clips
+                        </h3>
+
+                        <div id="jobs-empty" class="hidden text-sm text-slate-400 text-center py-6">
+                            No completed jobs with rendered clips yet. Finish a clipping job first.
+                        </div>
+
+                        <div id="jobs-list" class="space-y-3 mb-5"></div>
+
+                        <div id="upload-config" class="hidden">
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Interval (hours)</label>
+                                    <input id="input-interval-hours" type="number" min="0" step="0.5" value="2"
+                                        class="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-900 dark:text-white">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Timezone</label>
+                                    <input id="input-tz-name" type="text" value="Asia/Kolkata"
+                                        class="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-900 dark:text-white">
+                                </div>
+                                <div class="flex items-end pb-1">
+                                    <label class="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                        <input id="input-test-mode" type="checkbox" class="w-4 h-4 rounded border-slate-300">
+                                        Test mode (1 clip only)
+                                    </label>
+                                </div>
+                            </div>
+                            <button onclick="startUpload()" id="start-upload-btn" class="px-5 py-2.5 rounded-xl bg-brand-600 text-white font-semibold text-sm hover:bg-brand-700 transition-colors shadow-lg shadow-brand-500/20 flex items-center gap-2">
+                                <i data-lucide="rocket" class="w-4 h-4"></i> Start Upload
+                            </button>
+                        </div>
+
+                        <div id="upload-progress" class="hidden mt-5 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40">
+                            <div class="flex items-center gap-2 text-sm">
+                                <span class="spinner spinner-dark" id="upload-spinner"></span>
+                                <span id="upload-status-text">Uploading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="api.js"></script>
+    <script>
+        lucide.createIcons();
+
+        let selectedJobId = null;
+
+        async function init() {
+            if (!StudioAPI.isConfigured()) {
+                document.getElementById('no-backend-state').classList.remove('hidden');
+                return;
+            }
+            document.getElementById('page-content').classList.remove('hidden');
+            await refreshStatus();
+            await loadUploadableJobs();
+        }
+
+        async function refreshStatus() {
+            try {
+                const status = await StudioAPI.youtubeStatus();
+
+                if (status.has_client_secret) {
+                    document.getElementById('client-secret-status').textContent = '✅ Client saved';
+                    document.getElementById('client-secret-status').className = 'text-xs text-emerald-500';
+                } else {
+                    document.getElementById('client-secret-status').textContent = 'Not set';
+                    document.getElementById('client-secret-status').className = 'text-xs text-slate-400';
+                }
+
+                if (status.connected) {
+                    document.getElementById('connected-panel').classList.remove('hidden');
+                    document.getElementById('login-panel').classList.add('hidden');
+                    document.getElementById('connected-channel-name').textContent =
+                        `Connected as ${status.channel?.title || 'YouTube channel'}`;
+                } else {
+                    document.getElementById('connected-panel').classList.add('hidden');
+                    document.getElementById('login-panel').classList.remove('hidden');
+                }
+            } catch (err) {
+                console.error('youtube status error', err);
+            }
+        }
+
+        async function saveClientSecret() {
+            const btn = document.getElementById('save-secret-btn');
+            const content = document.getElementById('input-client-secret').value.trim();
+            if (!content) return;
+
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+            try {
+                await StudioAPI.saveYoutubeClientSecret(content);
+                document.getElementById('input-client-secret').value = '';
+                await refreshStatus();
+            } catch (err) {
+                alert('Failed to save: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Save Client';
+            }
+        }
+
+        async function getLoginLink() {
+            const btn = document.getElementById('get-link-btn');
+            const msg = document.getElementById('login-status-msg');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Fetching...';
+            msg.classList.add('hidden');
+
+            try {
+                const res = await StudioAPI.startYoutubeAuth();
+                document.getElementById('login-link-anchor').href = res.auth_url;
+                document.getElementById('login-link-anchor').textContent = res.auth_url;
+                document.getElementById('login-link-box').classList.remove('hidden');
+                document.getElementById('paste-back-box').classList.remove('hidden');
+            } catch (err) {
+                msg.className = 'text-xs mt-3 text-red-500';
+                msg.textContent = '❌ ' + err.message;
+                msg.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Get Login Link';
+            }
+        }
+
+        async function exchangeAuthCode() {
+            const btn = document.getElementById('exchange-btn');
+            const msg = document.getElementById('login-status-msg');
+            const val = document.getElementById('input-auth-code').value.trim();
+            if (!val) return;
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>';
+            msg.classList.add('hidden');
+
+            try {
+                await StudioAPI.exchangeYoutubeAuth(val);
+                document.getElementById('input-auth-code').value = '';
+                msg.className = 'text-xs mt-3 text-emerald-500';
+                msg.textContent = '✅ Logged in! Login is saved for future uploads.';
+                msg.classList.remove('hidden');
+                await refreshStatus();
+            } catch (err) {
+                msg.className = 'text-xs mt-3 text-red-500';
+                msg.textContent = '❌ ' + err.message;
+                msg.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Finish Login';
+            }
+        }
+
+        async function disconnectYoutube() {
+            if (!confirm('Disconnect the YouTube account from this Studio?')) return;
+            try {
+                await StudioAPI.disconnectYoutube();
+                await refreshStatus();
+            } catch (err) {
+                alert('Failed: ' + err.message);
+            }
+        }
+
+        async function loadUploadableJobs() {
+            try {
+                const { jobs } = await StudioAPI.fetchUploadableJobs();
+                const list = document.getElementById('jobs-list');
+
+                if (!jobs.length) {
+                    document.getElementById('jobs-empty').classList.remove('hidden');
+                    return;
+                }
+
+                list.innerHTML = jobs.map(j => `
+                    <label class="flex items-center gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-900/40 cursor-pointer transition-colors">
+                        <input type="radio" name="job-select" value="${j.job_id}" onchange="selectJob('${j.job_id}')" class="w-4 h-4">
+                        <div class="flex-1 min-w-0">
+                            <div class="text-sm font-medium text-slate-900 dark:text-white truncate">${j.url || j.job_id}</div>
+                            <div class="text-xs text-slate-400">${j.clip_count} clip(s) · ${j.uploaded_count} already uploaded</div>
+                        </div>
+                    </label>
+                `).join('');
+            } catch (err) {
+                console.error('load jobs error', err);
+            }
+        }
+
+        function selectJob(jobId) {
+            selectedJobId = jobId;
+            document.getElementById('upload-config').classList.remove('hidden');
+        }
+
+        async function startUpload() {
+            if (!selectedJobId) return;
+            const btn = document.getElementById('start-upload-btn');
+            const progress = document.getElementById('upload-progress');
+            const statusText = document.getElementById('upload-status-text');
+
+            const payload = {
+                job_id: selectedJobId,
+                interval_hours: parseFloat(document.getElementById('input-interval-hours').value) || 0,
+                tz_name: document.getElementById('input-tz-name').value.trim() || 'Asia/Kolkata',
+                test_mode: document.getElementById('input-test-mode').checked,
+            };
+
+            btn.disabled = true;
+            progress.classList.remove('hidden');
+            statusText.textContent = 'Starting upload...';
+
+            try {
+                await StudioAPI.startYoutubeUpload(payload);
+                pollUploadStatus(selectedJobId);
+            } catch (err) {
+                statusText.textContent = '❌ ' + err.message;
+                btn.disabled = false;
+            }
+        }
+
+        async function pollUploadStatus(jobId) {
+            const statusText = document.getElementById('upload-status-text');
+            const spinner = document.getElementById('upload-spinner');
+            const btn = document.getElementById('start-upload-btn');
+
+            const tick = async () => {
+                try {
+                    const res = await StudioAPI.fetchYoutubeUploadStatus(jobId);
+                    if (res.state === 'running') {
+                        statusText.textContent = 'Uploading clips...';
+                        setTimeout(tick, 3000);
+                    } else if (res.state === 'done') {
+                        spinner.style.display = 'none';
+                        const count = (res.results || []).filter(r => r.status === 'uploaded').length;
+                        statusText.textContent = `✅ Done — ${count} clip(s) uploaded.`;
+                        btn.disabled = false;
+                        loadUploadableJobs();
+                    } else if (res.state === 'failed') {
+                        spinner.style.display = 'none';
+                        statusText.textContent = '❌ ' + (res.error || 'Upload failed.');
+                        btn.disabled = false;
+                    }
+                } catch (err) {
+                    statusText.textContent = '❌ ' + err.message;
+                    btn.disabled = false;
+                }
+            };
+            tick();
+        }
+
+        init();
+    </script>
+</body>
+
+</html>

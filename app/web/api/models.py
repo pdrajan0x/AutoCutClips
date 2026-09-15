@@ -107,6 +107,7 @@ class JobCreateRequest(BaseModel):
     # Captions & framing
     font_style: Optional[FontStyle] = None
     caption_case: Optional[str] = Field(None, pattern="^(normal|upper)$")
+    caption_font_size: Optional[int] = Field(None, ge=20, le=200, description="Override caption base font size")
     title_overlay: Optional[bool] = None
     layout: Optional[str] = Field(None, pattern="^(auto|crop|blur)$")
     speaker_tracking: Optional[bool] = None

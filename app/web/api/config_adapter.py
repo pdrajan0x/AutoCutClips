@@ -52,6 +52,7 @@ PAYLOAD_TO_ARGS = {
     "silence_trim": ("silence_trim", bool),
     "font_style": ("font_style", None),
     "caption_case": ("caption_case", None),
+    "caption_font_size": ("caption_font_size", int),
     "title_overlay": ("no_title_overlay", _negate),
     "layout": ("layout", None),
     "speaker_tracking": ("no_speaker_tracking", _negate),

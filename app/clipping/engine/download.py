@@ -16,6 +16,15 @@ _BOT_CHECK_HINT = (
     "      --cookies /path/to/cookies.txt (or set YTDLP_COOKIES_FILE)."
 )
 
+_FORBIDDEN_HINT = (
+    "YouTube returned 403 Forbidden — the cached video/signature URL likely expired\n"
+    "      or the cookies session went stale between downloads (common when a queue\n"
+    "      leaves several minutes between videos). Try:\n"
+    "      1) Re-export a fresh cookies.txt and pass it with --cookies/--YTDLP_COOKIES_FILE\n"
+    "      2) Update yt-dlp: pip install -U yt-dlp\n"
+    "      3) Re-run the queue with --retry-failed — this video is skipped, not fatal."
+)
+
 PLATFORM_LABELS = {
     "youtube": "YouTube",
     "tiktok": "TikTok",
@@ -287,13 +296,32 @@ def download_video(
                 "Whisper will be used instead."
             )
 
-    with YoutubeDL(ydl_opts) as ydl:
-        try:
-            ydl.download([url])
-        except DownloadError as e:
-            if "not a bot" in str(e) or "Sign in to confirm" in str(e):
-                raise RuntimeError(f"{e}\n      {_BOT_CHECK_HINT}") from e
-            raise
+    import time
+
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        with YoutubeDL(ydl_opts) as ydl:
+            try:
+                ydl.download([url])
+                break
+            except DownloadError as e:
+                msg = str(e)
+                if "not a bot" in msg or "Sign in to confirm" in msg:
+                    raise RuntimeError(f"{e}\n      {_BOT_CHECK_HINT}") from e
+                is_forbidden = "403" in msg or "Forbidden" in msg
+                if is_forbidden and attempt < max_attempts:
+                    wait_s = 10 * attempt
+                    print(
+                        f"      ⚠️ 403 Forbidden (attempt {attempt}/{max_attempts}) — this is "
+                        f"usually a stale cache/signature URL or brief rate-limiting. "
+                        f"Retrying in {wait_s}s...",
+                        flush=True,
+                    )
+                    time.sleep(wait_s)
+                    continue
+                if is_forbidden:
+                    raise RuntimeError(f"{e}\n      {_FORBIDDEN_HINT}") from e
+                raise
 
     if not os.path.exists(output_path):
         raise RuntimeError(

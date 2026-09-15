@@ -413,6 +413,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write captions as spoken ('normal') or in UPPERCASE ('upper').",
     )
     p.add_argument(
+        "--caption-font-size",
+        type=int,
+        default=None,
+        help="Override the caption base font size (default: 90 for 9:16, 80 for 16:9, "
+        "scaled to the render resolution). Leave unset to use the font style's default.",
+    )
+    p.add_argument(
         "--simple-captions",
         action="store_true",
         help="Use the plain one-line karaoke captions instead of the default kinetic style "
@@ -906,6 +913,7 @@ def config_from_args(
         use_advanced_text=not args.simple_captions,
         caption_case=args.caption_case,
         title_overlay=not args.no_title_overlay,
+        caption_font_size=args.caption_font_size,
         # ASS position values
         ass_align_916=ASS_ALIGN_916,
         ass_margin_916=ASS_MARGIN_916,

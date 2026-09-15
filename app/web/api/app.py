@@ -18,7 +18,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import VERSION
-from .routes import files, jobs, settings
+from .routes import files, jobs, settings, youtube
 
 
 @asynccontextmanager
@@ -71,6 +71,7 @@ app.add_middleware(
 app.include_router(jobs.router)
 app.include_router(files.router)
 app.include_router(settings.router)
+app.include_router(youtube.router)
 
 
 @app.get("/")

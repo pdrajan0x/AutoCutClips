@@ -153,7 +153,10 @@ def build_ass_file(
     scale_factor = play_res_y / (1920 if vertical else 1080)
     align = cfg.ass_align_916 if vertical else cfg.ass_align_169
     margin_v = int((cfg.ass_margin_916 if vertical else cfg.ass_margin_169) * scale_factor)
-    font_sz = int((cfg.ass_font_916 if vertical else cfg.ass_font_169) * scale_factor)
+    base_font = getattr(cfg, "caption_font_size", None) or (
+        cfg.ass_font_916 if vertical else cfg.ass_font_169
+    )
+    font_sz = int(base_font * scale_factor)
     margin_lr = int((60 if vertical else 40) * scale_factor)
     outline_val = max(2, round(5 * scale_factor))
     shadow_val = max(1, round(2 * scale_factor))

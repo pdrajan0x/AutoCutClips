@@ -15,8 +15,13 @@ import hashlib
 import json
 import os
 import re
+import time
 import traceback
 from datetime import datetime, timezone
+
+# Pause between consecutive downloads so a queue doesn't hammer YouTube back to
+# back from the same (often shared Colab/Kaggle) IP and trigger a 403/rate-limit.
+INTER_VIDEO_COOLDOWN_S = 8
 
 QUEUE_DIR_NAME = "queue"
 STATE_FILE = "queue_state.json"
@@ -156,6 +161,10 @@ def run_queue(
         print("\n" + "#" * 70)
         print(f"🎬 [{index}/{total}] {url}")
         print("#" * 70)
+
+        if index > 1:
+            print(f"   ⏳ Cooling down {INTER_VIDEO_COOLDOWN_S}s before the next download...")
+            time.sleep(INTER_VIDEO_COOLDOWN_S)
 
         video_dir = os.path.join(queue_dir, key)
         os.makedirs(video_dir, exist_ok=True)

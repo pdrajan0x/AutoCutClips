@@ -116,6 +116,48 @@ const StudioAPI = (() => {
     return request('/api/shutdown', { method: 'POST' });
   }
 
+  // ---- YouTube upload ----
+  async function youtubeStatus() {
+    return request('/api/youtube/status');
+  }
+
+  async function saveYoutubeClientSecret(content) {
+    return request('/api/youtube/client-secret', {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  async function startYoutubeAuth() {
+    return request('/api/youtube/auth/start', { method: 'POST' });
+  }
+
+  async function exchangeYoutubeAuth(pastedUrlOrCode) {
+    return request('/api/youtube/auth/exchange', {
+      method: 'POST',
+      body: JSON.stringify({ pasted_url_or_code: pastedUrlOrCode }),
+    });
+  }
+
+  async function disconnectYoutube() {
+    return request('/api/youtube/auth', { method: 'DELETE' });
+  }
+
+  async function fetchUploadableJobs() {
+    return request('/api/youtube/uploadable-jobs');
+  }
+
+  async function startYoutubeUpload(payload) {
+    return request('/api/youtube/upload', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async function fetchYoutubeUploadStatus(jobId) {
+    return request(`/api/youtube/upload/${jobId}/status`);
+  }
+
   // Public API
   return {
     getBackendUrl,
@@ -131,6 +173,14 @@ const StudioAPI = (() => {
     updateSettings,
     createSSE,
     shutdownServer,
+    youtubeStatus,
+    saveYoutubeClientSecret,
+    startYoutubeAuth,
+    exchangeYoutubeAuth,
+    disconnectYoutube,
+    fetchUploadableJobs,
+    startYoutubeUpload,
+    fetchYoutubeUploadStatus,
   };
 })();
 
