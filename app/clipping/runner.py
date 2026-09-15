@@ -175,7 +175,12 @@ def _transcribe(cfg, progress: Progress) -> tuple[str, list[dict]]:
         language=_whisper_language(cfg),
         info_out=whisper_info,
     )
-    cfg.transcript_language = whisper_info.get("language") or cfg.transcript_language
+    # YouTube's own subtitle track names its language explicitly; Whisper only
+    # guesses, and guesses badly on singing (a Hindi song can come back as "nn"),
+    # so the track's language wins whenever there is one.
+    cfg.transcript_language = (
+        getattr(cfg, "transcript_language", None) or whisper_info.get("language")
+    )
 
     if youtube_transcript and transcript:
         # Both sources exist: let Gemini reconcile wording/gaps between them.
@@ -187,6 +192,17 @@ def _transcribe(cfg, progress: Progress) -> tuple[str, list[dict]]:
         # Whisper found nothing (e.g. VAD wiped out sung vocals) — the YouTube
         # captions are all there is; use their timing too since Whisper has none.
         transcript, segments = youtube_transcript, youtube_segments
+
+    if not segments:
+        # Everything downstream reads the transcript, so an empty one would fail
+        # much later as a confusing "the AI picked 0 clips" instead of the truth.
+        raise RuntimeError(
+            "No speech could be transcribed from this video. Whisper returned nothing"
+            + (" and YouTube had no subtitles either." if source_platform == "youtube"
+               else ".")
+            + " If the video is music or mostly non-speech there may be nothing to"
+            " caption; otherwise check that the downloaded file actually has audio."
+        )
 
     # Saved before captions are romanised, so a rerun starts from the real transcript.
     with open(cache_path, "w", encoding="utf-8") as f:

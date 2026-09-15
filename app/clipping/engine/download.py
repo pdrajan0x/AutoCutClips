@@ -25,13 +25,21 @@ _FORBIDDEN_HINT = (
     "      3) Re-run the queue with --retry-failed — this video is skipped, not fatal."
 )
 
+_NO_JS_RUNTIME_HINT = (
+    "No JavaScript runtime is installed, so yt-dlp cannot solve YouTube's signature\n"
+    "      challenges and silently drops every format it cannot decrypt. Install one:\n"
+    "        curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh\n"
+    "      (or Node >= 22, Bun >= 1.2.11). On Colab/Kaggle, re-run the notebook's\n"
+    "      setup cell — it installs Deno for exactly this reason."
+)
+
 _NO_FORMAT_HINT = (
-    "YouTube offered no downloadable format to any player client. This usually means\n"
-    "      the installed yt-dlp is too old for YouTube's current streaming setup, or\n"
-    "      this IP is being served SABR-only responses. Try:\n"
-    "      1) Update yt-dlp: pip install -U yt-dlp   (fixes this most of the time)\n"
-    "      2) Re-export a fresh cookies.txt from a logged-in browser\n"
-    "      3) Check the format list printed above — if it is empty, the video itself\n"
+    "YouTube offered no downloadable format to any player client. Most likely causes:\n"
+    "      1) No JavaScript runtime — see the warning above; this is the usual cause\n"
+    "         on Colab/Kaggle and it never mentions JavaScript in the error itself.\n"
+    "      2) Stale cookies — re-export cookies.txt from a logged-in browser\n"
+    "      3) Outdated yt-dlp: pip install -U yt-dlp\n"
+    "      4) Check the format list printed above — if it is empty, the video itself\n"
     "         may be members-only, age-restricted or region-blocked for this IP."
 )
 
@@ -70,6 +78,11 @@ def _log_available_formats(base_opts: dict, url: str) -> None:
 
     probe = dict(base_opts)
     probe.pop("format", None)
+    # The shared options silence yt-dlp, which is what hides the warnings that
+    # actually explain a failure (a missing JS runtime chief among them). This
+    # is the diagnostic path, so let them through.
+    probe["quiet"] = False
+    probe["no_warnings"] = False
     try:
         with YoutubeDL(probe) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -106,16 +119,27 @@ def _build_ydl_format_selector(download_source_height: str | int) -> str:
     with "Requested format is not available".
     """
     codec_filter = "[vcodec!*=av01]"
+    unrestricted = f"bestvideo{codec_filter}+bestaudio/best{codec_filter}/bestvideo+bestaudio/best"
 
     if download_source_height == "max":
-        return f"bestvideo{codec_filter}+bestaudio/best{codec_filter}/bestvideo+bestaudio/best"
+        return unrestricted
 
     try:
         h_val = int(download_source_height)
     except (ValueError, TypeError):
         h_val = 0
 
-    if 0 < h_val <= 1080:
+    if h_val <= 0:
+        # A typo like "--source-height 1080p" would otherwise be interpolated
+        # straight into the selector and crash yt-dlp with a SyntaxError.
+        print(
+            f"      ⚠️ Ignoring unusable source height {download_source_height!r}; "
+            "downloading the best available instead.",
+            flush=True,
+        )
+        return unrestricted
+
+    if h_val <= 1080:
         # At standard resolutions, prefer native MP4 (H.264/AAC) first.
         return (
             f"bestvideo[height<=?{h_val}][ext=mp4]{codec_filter}+bestaudio[ext=m4a]/"
@@ -127,10 +151,10 @@ def _build_ydl_format_selector(download_source_height: str | int) -> str:
         )
 
     return (
-        f"bestvideo[height<=?{download_source_height}]{codec_filter}+bestaudio/"
-        f"best[height<=?{download_source_height}]{codec_filter}/"
-        f"bestvideo[height<=?{download_source_height}]+bestaudio/"
-        f"best[height<=?{download_source_height}]"
+        f"bestvideo[height<=?{h_val}]{codec_filter}+bestaudio/"
+        f"best[height<=?{h_val}]{codec_filter}/"
+        f"bestvideo[height<=?{h_val}]+bestaudio/"
+        f"best[height<=?{h_val}]"
     )
 
 
@@ -342,6 +366,13 @@ def download_video(
 
     if is_youtube and "cookiefile" in ydl_opts:
         print(f"      🍪 Using cookies from {ydl_opts['cookiefile']}", flush=True)
+
+    if is_youtube:
+        runtime = ytdl.available_js_runtime()
+        if runtime:
+            print(f"      🟩 JS runtime: {runtime}", flush=True)
+        else:
+            print(f"      ⚠️ {_NO_JS_RUNTIME_HINT}", flush=True)
 
     info = None
     with YoutubeDL(ydl_opts) as ydl:

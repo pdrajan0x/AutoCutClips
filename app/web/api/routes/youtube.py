@@ -407,11 +407,39 @@ def _save_queue(items: list[dict]) -> None:
     os.replace(tmp, QUEUE_FILE)
 
 
+def _scheduled_at(entry: dict) -> datetime:
+    """
+    An entry's due time as an aware UTC datetime.
+
+    A missing/corrupt value must not be able to stall the whole queue, and a
+    naive timestamp must not blow up comparisons against an aware ``now``, so
+    anything unparseable is treated as due immediately.
+    """
+    try:
+        parsed = datetime.fromisoformat(str(entry.get("scheduled_at")))
+    except (TypeError, ValueError):
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _requeue_stranded_uploads() -> None:
+    """A backend restart mid-upload leaves items stuck in 'uploading' forever."""
+    with _queue_lock:
+        items = _load_queue()
+        stranded = [i for i in items if i.get("status") == "uploading"]
+        if not stranded:
+            return
+        for item in stranded:
+            item["status"] = "queued"
+        _save_queue(items)
+    print(f"[YouTube queue] Re-queued {len(stranded)} upload(s) interrupted by a restart.")
+
+
 @router.get("/queue")
 async def get_queue():
     with _queue_lock:
         items = _load_queue()
-    return {"items": sorted(items, key=lambda i: i["scheduled_at"])}
+    return {"items": sorted(items, key=_scheduled_at)}
 
 
 @router.post("/queue")
@@ -424,12 +452,17 @@ async def add_to_queue(req: QueueAddRequest):
     with _queue_lock:
         existing = _load_queue()
         pending_times = [
-            datetime.fromisoformat(i["scheduled_at"]) for i in existing if i["status"] == "queued"
+            _scheduled_at(i) for i in existing if i.get("status") == "queued"
         ]
-        start = (
-            datetime.fromisoformat(req.start_at) if req.start_at
-            else datetime.now(timezone.utc)
-        )
+        try:
+            start = (
+                datetime.fromisoformat(req.start_at) if req.start_at
+                else datetime.now(timezone.utc)
+            )
+        except ValueError:
+            raise HTTPException(400, "start_at must be an ISO datetime, e.g. 2026-09-15T18:00:00Z")
+        if not start.tzinfo:
+            start = start.replace(tzinfo=timezone.utc)
         next_slot = max([start, *pending_times]) if pending_times else start
 
         added = []
@@ -497,6 +530,9 @@ def _upload_one_queue_item(entry: dict) -> None:
         row = _manifest_row(entry["job_id"], entry["rank"])
         if not row:
             raise RuntimeError("The source job's render_manifest.json is gone.")
+        video_path = row.get("video_path") or entry.get("video_path")
+        if not video_path or not os.path.exists(video_path):
+            raise RuntimeError(f"The rendered clip is missing from disk: {video_path}")
         result = upload_video_to_youtube(
             youtube, row, publish_at_local=None, privacy_status=entry["privacy_status"]
         )
@@ -514,13 +550,18 @@ def _upload_one_queue_item(entry: dict) -> None:
 
 def _scheduler_tick() -> None:
     """Upload at most one due item per tick, so uploads stay serialized."""
+    # Without a token every claim would fail and burn the whole queue; the items
+    # should simply wait until the account is connected again.
+    if not os.path.exists(TOKEN_FILE):
+        return
+
     with _queue_lock:
         items = _load_queue()
         now = datetime.now(timezone.utc)
         due = next(
             (
-                i for i in sorted(items, key=lambda i: i["scheduled_at"])
-                if i["status"] == "queued" and datetime.fromisoformat(i["scheduled_at"]) <= now
+                i for i in sorted(items, key=_scheduled_at)
+                if i.get("status") == "queued" and _scheduled_at(i) <= now
             ),
             None,
         )
@@ -549,4 +590,5 @@ def _scheduler_loop() -> None:
         time.sleep(30)
 
 
+_requeue_stranded_uploads()
 threading.Thread(target=_scheduler_loop, daemon=True).start()

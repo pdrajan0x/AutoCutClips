@@ -221,6 +221,21 @@ class YouTubeFetcher:
                 )
         return self._ydl_module
 
+    @staticmethod
+    def _base_opts(**extra) -> dict:
+        """
+        Shared yt-dlp options, including the cookies file and JS runtimes.
+
+        Metadata-only requests hit the same YouTube bot check and signature
+        challenges as downloads do, so they go through the same helper rather
+        than hand-rolling options here.
+        """
+        from ..clipping import ytdl
+
+        opts = ytdl.base_opts(None, skip_download=True)
+        opts.update(extra)
+        return opts
+
     def fetch_video(self, url_or_id, _retries=MAX_RETRIES):
         """
         Fetch metadata for a single video with retry logic.
@@ -231,14 +246,7 @@ class YouTubeFetcher:
         vid_id = extract_video_id(url_or_id)
         url = f"https://www.youtube.com/watch?v={vid_id}" if vid_id else url_or_id
 
-        opts = {
-            "skip_download": True,
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": False,
-            "ignoreerrors": False,
-            "extractor_args": {"youtube": ["player_client=android,web"]},
-        }
+        opts = self._base_opts(extract_flat=False, ignoreerrors=False)
 
         last_error = None
         for attempt in range(1, _retries + 1):
@@ -279,16 +287,12 @@ class YouTubeFetcher:
         url = f"https://www.youtube.com/playlist?list={pl_id}" if pl_id else url_or_id
 
         # Step 1: Fetch playlist with flat extraction to get ALL video IDs
-        opts_flat = {
-            "skip_download": True,
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": "in_playlist",
-            "ignoreerrors": True,
-            "playlist_items": "1:",
-            "lazy_playlist": False,
-            "extractor_args": {"youtube": ["player_client=android,web"]},
-        }
+        opts_flat = self._base_opts(
+            extract_flat="in_playlist",
+            ignoreerrors=True,
+            playlist_items="1:",
+            lazy_playlist=False,
+        )
         
 
         print(f"  [Playlist] Fetching playlist index: {url}", file=sys.stderr)
@@ -318,14 +322,7 @@ class YouTubeFetcher:
         }
 
         # Step 2: For each entry, fetch full video metadata with retry
-        opts_video = {
-            "skip_download": True,
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": False,
-            "ignoreerrors": False,
-            "extractor_args": {"youtube": ["player_client=android,web"]},
-        }
+        opts_video = self._base_opts(extract_flat=False, ignoreerrors=False)
 
         for i, entry in enumerate(entries):
             if not entry:

@@ -61,23 +61,24 @@ def _call_gemini(client, model, contents, config):
     return json.loads(text)
 
 
-def _generate_json_with_retry(client, model, fallback_model, contents, config):
+def _generate_json_with_retry(client, model, fallback_model, contents, config, max_attempts=None):
     """Call Gemini with backoff, then try the fallback model once."""
+    max_attempts = max_attempts or MAX_ATTEMPTS
     last_exc = None
     status_code = None
 
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+    for attempt in range(1, max_attempts + 1):
         try:
-            print(f"[Gemini] Attempt {attempt}/{MAX_ATTEMPTS}...")
+            print(f"[Gemini] Attempt {attempt}/{max_attempts}...")
             return _call_gemini(client, model, contents, config)
         except Exception as exc:
             last_exc = exc
             status_code = _extract_status_code(exc)
             print(
-                f"[Gemini] Attempt {attempt}/{MAX_ATTEMPTS} failed | "
+                f"[Gemini] Attempt {attempt}/{max_attempts} failed | "
                 f"status={status_code} | error={exc}"
             )
-            if not _is_retryable(exc) or attempt == MAX_ATTEMPTS:
+            if not _is_retryable(exc) or attempt == max_attempts:
                 break
             wait_seconds = INITIAL_WAIT_SECONDS + (attempt - 1) * WAIT_INCREMENT_SECONDS
             print(f"[Gemini] Retrying in {wait_seconds} seconds...")
@@ -87,7 +88,7 @@ def _generate_json_with_retry(client, model, fallback_model, contents, config):
 
     if not fallback_model:
         raise RuntimeError(
-            f"Gemini failed after {MAX_ATTEMPTS} attempts. Last error: {last_exc}"
+            f"Gemini failed after {max_attempts} attempts. Last error: {last_exc}"
         ) from last_exc
 
     print(f"[Gemini] Trying once more with the fallback model ({fallback_model})...")
@@ -364,12 +365,16 @@ def merge_transcripts_with_ai(whisper_transcript: str, youtube_transcript: str, 
     )
 
     try:
+        # Merging only sharpens the transcript the clip picker reads, so it must
+        # not hold the pipeline hostage: the default retry ladder can burn ~30
+        # minutes before giving up, and falling back to Whisper alone is cheap.
         parsed = _generate_json_with_retry(
             client=client,
             model=cfg.gemini_model,
             fallback_model=getattr(cfg, "gemini_fallback_model", None),
             contents=prompt,
             config=config,
+            max_attempts=2,
         )
         merged = parsed.get("merged_transcript") if isinstance(parsed, dict) else None
         if merged and merged.strip():
