@@ -8,6 +8,86 @@ All notable changes to the **AutoCutClips** project will be documented in this f
 - **Patch (x.y.Z)**: Incremented for backward-compatible bug fixes or minor patches.
 
 
+## [v1.15.0] - 2026-09-15
+
+### Added
+- **Follow the speaker**: with two or more faces in frame, the standard renderer measures mouth movement (MediaPipe Face Landmarker, downloaded automatically) and frames whoever is talking. A new talker must lead for 1s before the camera moves, and the cut is backdated to when they started. No HuggingFace token needed. Disable with `--no-speaker-tracking`.
+- **Blurred-background fill**: clips with faces in under 30% of the frame time (slides, screen recordings, gameplay) are fitted over a blurred copy instead of cropped; landscape output from a portrait source gets the same instead of black bars. `--layout auto|crop|blur`.
+- **Channel learning**: `python -m app.cli learn-youtube` fetches views, likes and comments for uploaded clips into `outputs/channel_performance.json`. Clip runs then show Gemini the best and weakest clips (views per day over the first week, with their hook and length) once 6+ public clips are older than 48h. `--performance-file`, `--no-channel-learning`. Upload history now records each clip's hook, length, score and language.
+- **Clip length flags**: `--min-duration` / `--max-duration` (5-180s, default 30/80), used by the prompt, validation and segment trimming.
+- **Resumable runs**: the source video is reused when it was downloaded for the same URL, and the transcript is saved (`transcript_cache.json`) and reused when the transcription settings match. `queue --retry-failed` keeps the source of a failed video and reuses its saved AI selection, so a render crash retries straight into rendering.
+- **Captions**: `--caption-case upper`; the kinetic style is the default (`--simple-captions` for the plain look).
+
+### Changed
+- **Caption look**: Montserrat Black (`DEFAULT` preset) by default, thicker outline, the spoken word pops and turns gold, AI keywords stay gold and up to 150% size (was 210%).
+- **Hook teaser is opt-in** (`--hook-teaser`) and uses a clean cut; clips open directly on their strongest line by default. `--hook-source` still plays its clip as the teaser.
+- **Faster rendering**: the standard renderer frames the clip in one FFmpeg pass (the crop position is a time expression following the camera path) instead of piping every frame through OpenCV — B-roll and watermark clips still use the frame loop, which is also the automatic fallback. Face analysis reads frames sequentially instead of seeking per sample; the YOLO model and encoder detection are cached; intermediate encodes use the fastest preset; the smart-trim BGM pass copies the video stream instead of re-encoding it.
+- **Uploads**: `defaultAudioLanguage` is set to the detected spoken language (`defaultLanguage` stays English for the title and description).
+- **Settings defined once**: `config_from_args` builds the config for both the CLI and the web API; the web adapter maps request fields onto CLI options and leaves everything else at the CLI default. Job request fields are now optional.
+- The Studio's New Job page gains Hook Teaser, Headline Overlay, Follow the Speaker and clip-length controls.
+
+### Removed
+- The downloaded TV-glitch transition (`effects.py`) and the transition asset downloader (`transitions.py`).
+- Hook V2 multi-hook intros (`--hook-v2`, `--hook-v2-items`, `--hook-v2-style`, `--white-flash-duration`).
+- Ambient edge glow (`--edge-glow`, `--edge-glow-mode`); the voice-over intro keeps its freeze frame and waveform.
+- Developer visualisations (`--dev-mode`, `--dev-mode-with-output`, `--dev-mode-with-output-merge`, `--box-face-detection`, `--track-lines`).
+- `--advanced-text` / `--advanced-text-hook` (the kinetic style is now the default for all captions). `--no-hook` is still accepted and does nothing.
+- The React/Vite dashboard (`app/web/dashboard`) and its docker-compose service; the static Studio in `docs/studio` is the one frontend.
+- Thumbnail generation for vertical ratios — Shorts and Reels ignore custom thumbnails.
+
+### Fixed
+- Cropping a portrait source to `1:1`/`3:4`/`4:5` requested a crop wider than the frame and distorted the image.
+- Render manifests were missing `viral_score`, so the web API showed no scores and the queue's best-first ordering had nothing to sort on.
+- Voice-over intro captions used the output size as the source size, misplacing them with `--render-height source`.
+- On Windows every clip failed at the caption pass: the subtitle and font paths in the FFmpeg filter were not quoted.
+- Caption word spacing was measured at the wrong font size (Pillow and libass size fonts differently), so words spread apart or collided; the outline and the pop animation are now allowed for. Karaoke keywords no longer switch to the thinner accent font, and trailing commas and full stops are dropped from caption words.
+- Caption groups ran across sentences; they now break at sentence and clause ends and at pauses over 0.6s. Captions stay up through pauses of 0.6s or less instead of blinking off between groups.
+- Follow the speaker: a missed face detection no longer hands the frame to the listener (the camera holds for up to 3s), the camera opens on whoever talks first instead of the largest face, and a talker no longer loses their track to a stale track of their own earlier position.
+- Renders were forced to 30 fps, duplicating frames from 24/25 fps sources (judder); they now keep the source frame rate (50/60 fps sources are halved).
+- B-roll inserts seeked for every frame and stuttered; they are now read in order and hold their last frame when shorter than their slot.
+- Intermediate files were only cleaned up when a clip failed, and the headline was burned into the main clip as well as the hook intro.
+- The standard renderer's `sendcmd` crop could be silently ignored by some FFmpeg builds, leaving the camera static.
+- Clip selection: clips overlapping another by more than 25% are dropped, as are clips scoring under 60 when a stronger one exists; clip ends move to the end of the sentence (up to 2.5s later, or 6s earlier) when the transcript is punctuated.
+- YouTube auto-caption transcripts reached Gemini as two-to-three-word fragments; they are now grouped into sentence-sized lines.
+- Fonts were re-checked and `fc-cache` rerun for every clip.
+
+---
+
+## [v1.14.0] - 2026-09-15
+
+### Added
+- **Video queue**: `python -m app.cli queue --links links.txt [clip flags]` clips every URL in a text file, one folder per video under `outputs/queue/<video-id>/`. Progress lives in `queue_state.json`, so a re-run skips finished videos, and `queue_manifest.json` collects every clip from every video, best first, for one upload run.
+- **yt-dlp cookies**: `--cookies cookies.txt` (or `$YTDLP_COOKIES_FILE`) for the source download, subtitles and glitch/transition assets — fixes YouTube's "Sign in to confirm you're not a bot" on Colab/Kaggle.
+- **On-screen hook headline**: Gemini now writes a 3-7 word `on_screen_hook`, burned in at the top of the frame for the first 4 seconds for sound-off viewers. Disable with `--no-title-overlay`.
+- **Colab-friendly YouTube login**: `youtube-token generate --manual` prints a login link and takes the redirected URL back, no local browser needed.
+- **Colab notebook** rewritten around the queue: secrets, cookies, Drive persistence, clip review with previews, and scheduled upload.
+
+### Changed
+- **Clip-selection prompt** rebuilt from short-form retention research: a candidate pool, a quality gate (cold-open, stranger, one-idea, payoff and ending tests), a calibrated score rubric, a flash-forward hook when the teaser is on, and far stricter B-roll rules.
+- **Cut points snap to word boundaries** with a short lead-in and tail, so clips no longer start or end mid-word.
+- **Hook teaser** is skipped when the clip already opens on its hook (it used to play the same line twice).
+- **Face tracking** holds the last known face on missed detections instead of jumping to the frame centre, sticks with the current speaker, only cuts after a jump persists for 0.5s, and cuts instead of whip-panning.
+- **Audio** is loudness-normalised to -14 LUFS; default BGM volume lowered from 0.25 to 0.12.
+- **Video quality**: NVENC preset p1 → p4, and the intermediate render is near-lossless so the subtitle pass no longer compounds compression artefacts.
+- **Captions**: default 3 words per group (was 5).
+- **Hashtags**: 10-15 per clip (was 2-3), built for discovery — source first (show/channel, host, guest), then the clip's specific subjects, audience niche and format — instead of mood words. The source video's title, channel, tags, chapters and description are now saved at download (`source_video.info.json`) and given to Gemini so it can name the source. Hashtags are cleaned to letters/digits and capped at 15, since YouTube ignores all hashtags beyond that.
+- **Any spoken language**: Whisper transcribes in the language actually spoken (`--language auto` uses YouTube's reported language, then detection; `task="transcribe"`, never translate). With the default `--caption-script latin`, speech in a non-Latin script (Hindi, Tamil, Arabic, ...) keeps its language but the captions are written in English letters — e.g. "namaste, mera naam priyadarshani rajan hai" — via a word-for-word Gemini transliteration of the selected clips, so caption timings are unchanged. The on-screen headline follows the same rule; title, description and hashtags stay in English. `--caption-script native` keeps the original script. `--use-dlp-subs` now fetches the original-language track instead of YouTube's machine-translated English one.
+- **Uploads use the hashtags**: the YouTube description keeps its line breaks (it used to be flattened into one line) and always carries the clip's hashtags before the source credit; the hashtag words are added to the video tags within YouTube's 500-character limit. Instagram captions get the same description with hashtags.
+- **Whisper**: VAD filtering and no previous-text conditioning to stop hallucinated captions over music/silence; the model is cached across queue videos.
+- B-roll picks from the three most relevant Pexels results instead of a random one of thirty.
+- **BGM library**: the `upbeat/` folder held a lullaby, a devotional song, nature ambience and a romantic piano piece, so "upbeat" clips got mismatched music. Ambience and piano moved to `chill/`; the lullaby and devotional song moved to `_unused/` (never picked). New `--bgm-dir` (e.g. a Drive music folder) and `--bgm-volume` flags; `assets/bgm/README.md` translated to English with track-selection guidance.
+
+### Fixed
+- A leftover `source_video.mp4` made a new URL silently re-clip the previous video (yt-dlp skips existing files); stale `.json3` subtitles were also reused.
+- Re-running `upload-youtube` uploaded the same clips again, because upload status was only written to the separate updated manifest. Uploaders now also match rows by `video_path` instead of rank.
+- The YouTube description never included the `Source:` credit (the URL was attached after the description was built).
+- Failed FFmpeg passes in smart-trim segments and Hook V2 were ignored, shipping clips with missing parts.
+- Speaker-count estimation loaded a non-existent YOLO model name and permanently switched the run to MediaPipe.
+- The `player_client` `extractor_args` was malformed and silently ignored by yt-dlp; removed (forcing the android client would also drop cookies).
+- Gemini empty responses skipped every retry; resumable upload chunks now retry transient 5xx/connection errors.
+- Overlapping or unsorted `keep_segments` repeated audio.
+
+
 ## [v1.13.4] - 2026-08-01
 
 ### Added

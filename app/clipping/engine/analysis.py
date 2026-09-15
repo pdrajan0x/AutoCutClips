@@ -42,6 +42,10 @@ def _extract_status_code(exc: Exception):
 def _is_retryable(exc: Exception) -> bool:
     if isinstance(exc, json.JSONDecodeError):
         return True
+    # An empty response.text is usually transient (overload, cut-off stream);
+    # it used to skip every retry and go straight to the weaker fallback model.
+    if isinstance(exc, ValueError) and "empty response" in str(exc):
+        return True
     if _extract_status_code(exc) in RETRYABLE_STATUS_CODES:
         return True
     msg = str(exc).lower()
@@ -140,6 +144,7 @@ def _build_clip_schema(cfg, *, uppercase: bool) -> dict:
         "hook_start_time": num,
         "hook_end_time": num,
         "hook_text": text,
+        "on_screen_hook": text,
         "bgm_mood": enum(["chill", "epic", "sad", "upbeat", "suspense"]),
         "typography_plan": array(
             obj(
@@ -174,23 +179,6 @@ def _build_clip_schema(cfg, *, uppercase: bool) -> dict:
 
     # Only ask for the optional blocks when the prompt actually requested them —
     # requiring them unconditionally wastes tokens and degrades clip quality.
-    if cfg is not None and getattr(cfg, "hook_v2", False):
-        clip_properties["hook_v2"] = obj(
-            {
-                "enabled": boolean,
-                "items": array(
-                    obj(
-                        {"start_time": num, "end_time": num, "text": text},
-                        ["start_time", "end_time", "text"],
-                    )
-                ),
-                "transition": obj(
-                    {"type": enum(["white_flash", "glitch"])}, ["type"]
-                ),
-            },
-            ["enabled", "items", "transition"],
-        )
-
     if not (cfg is None or getattr(cfg, "no_segment_trim", False)):
         clip_properties["keep_segments"] = array(
             obj({"start_time": num, "end_time": num}, ["start_time", "end_time"])
@@ -315,13 +303,14 @@ def analyze_with_gemini(transcript: str, cfg) -> list[dict]:
         response_schema=_build_clip_schema(cfg, uppercase=True),
     )
 
-    return _generate_json_with_retry(
+    parsed = _generate_json_with_retry(
         client=client,
         model=cfg.gemini_model,
         fallback_model=getattr(cfg, "gemini_fallback_model", None),
         contents=prompt,
         config=gemini_config,
     )
+    return _unwrap_clip_list(parsed, "Gemini")
 
 
 def analyze_with_ai(transcript: str, cfg) -> list[dict]:

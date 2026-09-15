@@ -15,9 +15,3 @@ outputs/
 custom_fonts/
 .git/
 .env
-
-# Node
-node_modules/
-dist/
-web/dashboard/node_modules/
-web/dashboard/dist/

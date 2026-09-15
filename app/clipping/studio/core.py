@@ -1,9 +1,10 @@
 """
 Core Studio pipeline orchestrator.
 
-``process_clip()`` drives the whole per-clip render: hook assembly, renderer
-selection (hybrid / split-screen / camera-switch), subtitles, B-roll, BGM,
-voice-over, transitions and thumbnail generation.
+``process_clip()`` drives the per-clip render: the optional hook teaser,
+renderer selection (hybrid / split-screen / camera-switch), smart-trim
+segments, captions, B-roll, BGM, the voice-over intro and — for landscape
+output only — the thumbnail.
 """
 
 import os
@@ -11,11 +12,8 @@ import subprocess
 
 import cv2
 
-from . import transitions
-from .audio_bgm import build_bgm_filter, get_local_bgm_file
+from .audio_bgm import LOUDNORM_FILTER, build_bgm_filter, get_local_bgm_file
 from .broll import download_pexels_broll
-from .edge_glow import generate_edge_glow_video
-from .effects import prepare_glitch_video
 from .ffmpeg_utils import (
     build_ffmpeg_progress_cmd,
     get_ts_encode_args,
@@ -27,74 +25,228 @@ from .render_split_screen import render_split_screen_video
 from .subtitles import build_ass_file
 from .thumbnail import build_thumbnail
 from .typography import prepare_typography_fonts
-from .utils import _get_render_dims, _is_vertical_ratio, escape_ffmpeg_filter_value
+from .utils import _get_render_dims, _is_vertical_ratio, ffmpeg_filter_path
+
+# A teaser only makes sense when the hook comes from later in the clip; if the
+# clip already opens on the hook, the teaser just plays the same line twice.
+TEASER_MIN_HOOK_OFFSET = 2.0
+
+# How long the on-screen hook headline stays up at the start of the clip.
+TITLE_OVERLAY_SECONDS = 4.0
+
+SHARPEN_FILTER = "unsharp=5:5:0.5:5:5:0.0"
+
+# Voice-over intro waveform
+WAVE_SIZE = (800, 260)
+WAVE_COLOR = "0x00FFFF"
+WAVE_ALPHA = 0.65
+WAVE_LOWPASS_HZ = 300
+
+# Re-mux a finished TS with new audio without re-encoding the video.
+_COPY_VIDEO_TS_ARGS = ["-c:v", "copy", "-c:a", "aac", "-ar", "48000", "-ac", "2", "-f", "mpegts"]
 
 
-def process_clip(
-    rank, clip, ratio, glitch_ts, data_segments, cfg, video_encoder, diarization_data=None
-):
+def _subtitle_filter(ass_path, cfg):
+    return f"subtitles={ffmpeg_filter_path(ass_path)}:fontsdir={ffmpeg_filter_path(cfg.font_dir)}"
+
+
+def _run_checked(cmd, output_path, duration, label):
+    rc, errors = run_ffmpeg_with_progress(
+        build_ffmpeg_progress_cmd(cmd, output_path), duration, label=label
+    )
+    if rc != 0:
+        raise RuntimeError(f"{label} failed:\n" + "\n".join(errors))
+
+
+def _concat_ts(parts, output_path, extra_args=()):
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+         "-i", "concat:" + "|".join(parts), "-c", "copy", *extra_args, output_path],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+
+def _resolve_bgm(clip, cfg):
+    """Pick a local BGM track for the clip's mood (falling back to chill), or None."""
+    if not cfg.use_auto_bgm:
+        return None
+    bgm_dir = getattr(cfg, "bgm_dir", os.path.join(cfg.base_dir, "assets", "bgm"))
+    mood = clip.get("bgm_mood", "chill")
+    if mood not in getattr(cfg, "bgm_moods", ["chill"]):
+        mood = "chill"
+
+    print(f"   🎵 Looking for a local BGM file (mood: {mood})...")
+    path = get_local_bgm_file(mood, bgm_dir)
+    if not path and mood != "chill":
+        print("   🔄 Falling back to the chill BGM...")
+        path = get_local_bgm_file("chill", bgm_dir)
+    if path:
+        print(f"   ✅ BGM ready: {path}")
+    else:
+        print("   ⚠️ The BGM folder is empty or has no mp3 files. Rendering without BGM.")
+    return path
+
+
+def _render_visual(cfg, ratio, source, output, start, end, label, *,
+                   use_split, use_camera_switch, diarization_data, broll=None):
+    """Render a silent clip part with the renderer the run is configured for."""
+    if use_split:
+        return render_split_screen_video(
+            source, output, start, end, ratio, diarization_data, cfg,
+            label=f"{label} SplitScreen", broll_data=broll,
+        )
+    if use_camera_switch:
+        return render_camera_switch_video(
+            source, output, start, end, ratio, diarization_data, cfg,
+            label=f"{label} CameraSwitch", broll_data=broll,
+        )
+    return render_hybrid_video(source, output, start, end, ratio, cfg, broll, label=label)
+
+
+def _audio_duration(path, fallback):
+    try:
+        res = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            stdout=subprocess.PIPE, text=True, check=True,
+        )
+        return float(res.stdout.strip())
+    except Exception:
+        return fallback
+
+
+def _render_voiceover_intro(rank, ratio, cfg, vo_data, std_p, source_dim,
+                            typography_plan, file_bgm, m_start):
+    """Freeze frame + waveform + narrator intro. Returns the TS path, or None."""
+    if not vo_data or not os.path.exists(vo_data.get("audio_path", "")):
+        return None
+
+    vo_ts = os.path.join(cfg.outputs_dir, f"vo_intro_{rank}.ts")
+    frame_path = os.path.join(cfg.outputs_dir, f"vo_bg_{rank}.jpg")
+    print("   📸 [VO] Rendering the voice-over intro (freeze frame + waveform)...")
+
+    try:
+        subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+             "-ss", str(m_start), "-i", cfg.source_video_path,
+             "-vframes", "1", "-q:v", "2", frame_path],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Could not extract the opening frame for the VO intro:\n{e.stderr}")
+
+    fallback = float(vo_data["segments"][-1]["end"]) if vo_data.get("segments") else 4.5
+    vo_duration = _audio_duration(vo_data["audio_path"], fallback) + 0.5
+    vo_w, vo_h = _get_render_dims(cfg, ratio, source_h=source_dim[1])
+
+    subs = ""
+    overlay_out = "[v_out]"
+    if not cfg.no_subs and vo_data.get("segments"):
+        ass_vo = os.path.join(cfg.outputs_dir, f"vo_subs_{rank}.ass")
+        build_ass_file(
+            vo_data["segments"], 0.0, vo_duration, ass_vo, ratio, cfg,
+            typography_plan=typography_plan, source_dim=source_dim,
+        )
+        subs = f"; [v_wave]{_subtitle_filter(ass_vo, cfg)}[v_out]"
+        overlay_out = "[v_wave]"
+
+    wave_w, wave_h = WAVE_SIZE
+    fps = getattr(cfg, "render_fps", None) or 30
+    graph = (
+        f"[0:v]scale={vo_w}:{vo_h}:force_original_aspect_ratio=increase,crop={vo_w}:{vo_h},"
+        f"colorchannelmixer=rr=0.3:gg=0.3:bb=0.3[v_bg]; "
+        f"[1:a]asplit=2[vo_a][vo_wave_in]; "
+        f"[vo_wave_in]lowpass=f={WAVE_LOWPASS_HZ},"
+        f"showwaves=s={wave_w}x{wave_h}:mode=cline:colors={WAVE_COLOR}:rate={fps:g}:scale=sqrt,"
+        f"format=rgba,colorkey=0x000000:0.1:0.1,colorchannelmixer=aa={WAVE_ALPHA}[wave_v]; "
+        f"[v_bg][wave_v]overlay=(W-w)/2:(H-h)/2:shortest=1{overlay_out}{subs}"
+    )
+
+    vo_vol = getattr(cfg, "voiceover_volume", 1.0)
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-loop", "1", "-framerate", f"{fps:g}", "-i", frame_path,
+        "-i", vo_data["audio_path"],
+    ]
+    if file_bgm:
+        cmd += ["-stream_loop", "-1", "-i", file_bgm]
+        graph += (
+            f"; [2:a]volume={cfg.bgm_base_volume}[bgm_vol]; [vo_a]volume={vo_vol}[vo_loud]; "
+            f"[bgm_vol][vo_loud]amix=inputs=2:duration=first:dropout_transition=2[a_out]"
+        )
+    else:
+        graph += f"; [vo_a]volume={vo_vol}[a_out]"
+    cmd += ["-filter_complex", graph, "-map", "[v_out]", "-map", "[a_out]",
+            "-t", str(vo_duration)] + std_p + [vo_ts]
+
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"The FFmpeg VO intro pass failed (rank {rank}):\n{e.stderr}")
+    finally:
+        if os.path.exists(frame_path):
+            os.remove(frame_path)
+    return vo_ts
+
+
+def process_clip(rank, clip, ratio, data_segments, cfg, video_encoder, diarization_data=None):
     """
-    Run full clip processing pipeline from render to final output files.
+    Render one clip from the AI's plan to the finished MP4.
 
     Args:
         rank: Clip rank/index.
         clip: Clip metadata object.
         ratio: Target output ratio.
-        glitch_ts: Optional prepared glitch transition path.
         data_segments: Transcript segments.
         cfg: Runtime config object.
         video_encoder: Encoder descriptor dict.
         diarization_data: Optional speaker diarization metadata.
 
     Returns:
-        Manifest dictionary describing processing result and output paths.
+        Manifest dictionary describing the result and output paths.
     """
-    get_x_h = None
-    get_x_main = None
     h_start = float(clip.get("hook_start_time", clip["start_time"]))
-    h_end = float(
-        clip.get(
-            "hook_end_time",
-            clip.get("hook_start_time", clip["start_time"]) + cfg.hook_duration,
-        )
-    )
-    
-    # Custom Hook Override
+    h_end = float(clip.get("hook_end_time", h_start + cfg.hook_duration))
+
     file_hook_src = cfg.source_video_path
     custom_hook = clip.get("custom_hook_info")
     if custom_hook:
         file_hook_src = custom_hook["file_path"]
         h_start = getattr(cfg, "hook_source_start", 0.0)
-        
+        h_end = h_start + cfg.hook_duration
         cap_h = cv2.VideoCapture(file_hook_src)
         try:
             fps = cap_h.get(cv2.CAP_PROP_FPS)
             frames = cap_h.get(cv2.CAP_PROP_FRAME_COUNT)
-            vid_duration = frames / fps if fps > 0 else float("inf")
-        except cv2.error:
-            vid_duration = float("inf")
+            if fps > 0 and frames > 0:
+                h_end = min(h_end, frames / fps)
         finally:
             cap_h.release()
 
-        h_end = h_start + cfg.hook_duration
-        if h_end > vid_duration:
-            h_end = vid_duration
     m_start = float(clip["start_time"])
     m_end = float(clip["end_time"])
     title = clip.get("title")
+    vertical = _is_vertical_ratio(ratio)
 
     out_vid = os.path.join(cfg.outputs_dir, f"highlight_rank_{rank}_ready.mp4")
-    if getattr(cfg, "dev_mode_with_output_merge", False):
-        out_vid = os.path.join(cfg.outputs_dir, f"highlight_rank_{rank}_dev_mode_merge_ready.mp4")
-        
-    out_thm = os.path.join(cfg.outputs_dir, f"thumbnail_rank_{rank}.jpg")
+    # Shorts and Reels ignore custom thumbnails, so only landscape clips get one.
+    out_thm = None if vertical else os.path.join(cfg.outputs_dir, f"thumbnail_rank_{rank}.jpg")
 
-    # Read the source resolution so dev-mode can place subtitles correctly.
     source_cap = cv2.VideoCapture(cfg.source_video_path)
-    sw = int(source_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    sh = int(source_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    source_dim = (
+        int(source_cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+        int(source_cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+    )
     source_cap.release()
-    source_dim = (sw, sh)
+
+    keep_segments = clip.get("keep_segments")
+    use_segments = bool(
+        keep_segments and len(keep_segments) > 1 and not getattr(cfg, "no_segment_trim", False)
+    )
+    rendered_duration = (
+        sum(float(s["end_time"]) - float(s["start_time"]) for s in keep_segments)
+        if use_segments else m_end - m_start
+    )
 
     manifest_item = {
         "rank": rank,
@@ -103,18 +255,20 @@ def process_clip(
         "video_path": out_vid,
         "thumbnail_path": out_thm,
         "thumbnail_text": title or f"Highlight {rank}",
-        "youtube_title_final": clip.get(
-            "youtube_title_final", clip.get("title", "")
-        ),
+        "youtube_title_final": clip.get("youtube_title_final", clip.get("title", "")),
         "youtube_description_final": clip.get("youtube_description_final", ""),
         "youtube_tags_final": clip.get("youtube_tags_final", []),
         "title": clip.get("title", ""),
         "hashtags": clip.get("hashtags", ""),
+        "viral_score": clip.get("viral_score"),
+        "on_screen_hook": clip.get("on_screen_hook", ""),
+        "hook_text": clip.get("hook_text", ""),
+        "language": getattr(cfg, "transcript_language", None),
         "start_time": m_start,
         "end_time": m_end,
         "hook_start_time": h_start,
         "hook_end_time": h_end,
-        "duration": round(m_end - m_start, 2),
+        "duration": round(rendered_duration, 2),
         "reason": clip.get("reason", ""),
         "broll_list": clip.get("broll_list", []),
         "typography_plan": clip.get("typography_plan", []),
@@ -130,27 +284,23 @@ def process_clip(
     typography_plan = clip.get("typography_plan", [])
     prepare_typography_fonts(cfg)
 
-    h_ts, m_ts, a_hook, a_main = (
-        f"h_{rank}.ts",
-        f"m_{rank}.ts",
-        f"ah_{rank}.ass",
-        f"am_{rank}.ass",
-    )
+    h_ts, m_ts, a_hook, a_main = f"h_{rank}.ts", f"m_{rank}.ts", f"ah_{rank}.ass", f"am_{rank}.ass"
     h_silent, m_silent = f"h_silent_{rank}.mp4", f"m_silent_{rank}.mp4"
-    
-    dev_dual = getattr(cfg, "dev_mode_with_output", False)
-    h_ts_dev = f"h_{rank}_dev.ts"
-    m_ts_dev = f"m_{rank}_dev.ts"
-    # Must match how the renderers name their dev-visualisation output
-    # (see render_split_screen.py), or the dev pass re-encodes the normal
-    # render and the real dev file is orphaned on disk.
-    m_silent_dev = m_silent.replace(".ts", "_dev.ts").replace(".mp4", "_dev.mp4")
-    
-    hook_enabled = cfg.use_hook_glitch
 
+    # --hook-source always plays its clip as the teaser; otherwise the teaser is opt-in.
+    hook_enabled = bool(getattr(cfg, "hook_teaser", False) or custom_hook)
+    if hook_enabled and not custom_hook and h_start - m_start < TEASER_MIN_HOOK_OFFSET:
+        print("   ⏭️ [Hook] The clip already opens on its hook — skipping the teaser so the line isn't heard twice.")
+        hook_enabled = False
 
-    # Determine if we should use split-screen mode
-    if getattr(cfg, "use_split_screen", False) and _is_vertical_ratio(ratio):
+    title_overlay = None
+    if getattr(cfg, "title_overlay", True) and clip.get("on_screen_hook"):
+        title_overlay = {"text": clip["on_screen_hook"], "duration": TITLE_OVERLAY_SECONDS}
+    # The headline belongs to what the viewer sees first: the teaser when there
+    # is one (it used to appear again when the main clip started).
+    main_overlay = None if hook_enabled and not custom_hook else title_overlay
+
+    if getattr(cfg, "use_split_screen", False) and vertical:
         if cfg.split_trigger == "face":
             use_split = True
         else:
@@ -161,903 +311,211 @@ def process_clip(
     else:
         use_split = False
 
-    # Camera-switch mode (mutually exclusive: split-screen takes precedence)
-    use_camera_switch = (
+    use_camera_switch = bool(
         not use_split
         and getattr(cfg, "use_camera_switch", False)
-        and _is_vertical_ratio(ratio)
+        and vertical
         and diarization_data
         and len(set(s["speaker"] for s in diarization_data)) >= 2
     )
 
-    broll_list = clip.get("broll_list", [])
     active_broll = []
+    broll_list = clip.get("broll_list", [])
     if cfg.use_broll and broll_list:
         print(f"   🎥 Downloading {len(broll_list)} B-roll video(s) from Pexels...")
         for i, br in enumerate(broll_list):
-            q = br.get("search_query", "nature")
             file_broll = f"temp_broll_{rank}_{i}.mp4"
-            if download_pexels_broll(q, ratio, file_broll, cfg.pexels_api_key):
-                br_copy = dict(br)
-                br_copy["filepath"] = file_broll
-                active_broll.append(br_copy)
+            if download_pexels_broll(br.get("search_query", "nature"), ratio, file_broll, cfg.pexels_api_key):
+                active_broll.append(dict(br, filepath=file_broll))
 
-    std_p = get_ts_encode_args(video_encoder, fps=30)
+    # Every part of the clip is encoded at the source's own frame rate (set by the
+    # runner); forcing 30 fps duplicated frames of 24/25 fps sources and made pans judder.
+    std_p = get_ts_encode_args(video_encoder, fps=getattr(cfg, "render_fps", None) or 30)
+    render_modes = dict(
+        use_split=use_split,
+        use_camera_switch=use_camera_switch,
+        diarization_data=diarization_data,
+    )
 
     try:
-        # HOOK
-        hook_v2_data = clip.get("hook_v2", {})
-        # Hook V2 is independent of --no-hook (which only disables v1 teaser)
-        use_hook_v2 = getattr(cfg, "hook_v2", False)
+        file_bgm = _resolve_bgm(clip, cfg)
 
-        if use_hook_v2:
-            print("   📸 [Hook V2] Rendering Multi-Hook Intro...")
-            h_ts_parts = []
-            items = hook_v2_data.get("items", []) if hook_v2_data else []
+        # ---- HOOK TEASER ---------------------------------------------------------
+        if hook_enabled:
+            print("   📸 [Hook] Rendering the teaser...")
+            _render_visual(
+                cfg, ratio, file_hook_src, h_silent, h_start, h_end, f"Rank {rank} Hook",
+                use_split=use_split, use_camera_switch=use_camera_switch,
+                diarization_data=None if custom_hook else diarization_data,
+            )
 
-            # Fallback: if AI didn't provide hook_v2 items, generate from hook timing
-            if not items:
-                num_items = getattr(cfg, "hook_v2_items", 3)
-                hook_total = h_end - h_start
-                chunk_dur = max(0.5, hook_total / num_items)
-                items = []
-                for fi in range(num_items):
-                    fi_start = h_start + fi * chunk_dur
-                    fi_end = min(fi_start + chunk_dur, h_end)
-                    if fi_end <= fi_start:
-                        break
-                    items.append({"start_time": fi_start, "end_time": fi_end, "text": ""})
-                print(f"   ⚠️ [Hook V2] The AI returned no items; falling back to {len(items)} cut(s) from the hook timing.")
-
-            out_w_v2, out_h_v2 = _get_render_dims(cfg, ratio, source_h=sh)
-            flash_dur = getattr(cfg, "white_flash_duration", 0.12)
-
-            for i, item in enumerate(items):
-                item_start = float(item["start_time"])
-                item_end = float(item["end_time"])
-                item_silent = f"h_v2_silent_{rank}_{i}.mp4"
-                item_ts = f"h_v2_ts_{rank}_{i}.ts"
-
-                # Render visual (face-tracked crop)
-                render_hybrid_video(
-                    file_hook_src, item_silent,
-                    item_start, item_end, ratio, cfg,
-                    label=f"Rank {rank} HookV2 Item {i}",
-                )
-
-                # Build video filter + audio mux
-                vf_parts = []
-                if cfg.video_sharpen:
-                    vf_parts.append("unsharp=5:5:0.5:5:5:0.0")
-
-                cmd_item = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                    "-i", item_silent,
-                    "-ss", str(item_start), "-to", str(item_end),
-                    "-i", file_hook_src,
-                    "-map", "0:v:0", "-map", "1:a:0",
-                ]
-                if vf_parts:
-                    cmd_item += ["-vf", ",".join(vf_parts)]
-                cmd_item += std_p
-
-                cmd_item_full = build_ffmpeg_progress_cmd(cmd_item, item_ts)
-                run_ffmpeg_with_progress(
-                    cmd_item_full, item_end - item_start,
-                    label=f"Rank {rank} HookV2 FFmpeg {i}",
-                )
-                h_ts_parts.append(item_ts)
-
-                # Transition between items AND after the last item (before main clip)
-                trans_mp4 = f"h_v2_trans_{rank}_{i}.mp4"
-                trans_ts = f"h_v2_trans_{rank}_{i}.ts"
-                trans_type = hook_v2_data.get("transition", {}).get("type", "white_flash") if hook_v2_data else "white_flash"
-                if "glitch" in trans_type:
-                    transitions.create_glitch_transition(
-                        trans_mp4, duration=flash_dur,
-                        width=out_w_v2, height=out_h_v2,
-                    )
-                else:
-                    transitions.create_white_flash_transition(
-                        trans_mp4, duration=flash_dur,
-                        width=out_w_v2, height=out_h_v2,
-                    )
-                # Convert to .ts for concat (stream copy — already encoded above)
-                subprocess.run(
-                    ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                     "-i", trans_mp4, "-c", "copy",
-                     "-bsf:v", "h264_mp4toannexb",
-                     "-f", "mpegts", trans_ts],
-                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                )
-                h_ts_parts.append(trans_ts)
-                lbl = f"Transition {i + 1}" if i < len(items) - 1 else "Final transition"
-                print(f"      ⚡ {lbl} ({trans_type}) added.")
-
-            # Concat all hook v2 pieces into h_ts
-            if h_ts_parts:
-                concat_str = "concat:" + "|".join(h_ts_parts)
-                subprocess.run(
-                    ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                     "-i", concat_str, "-c", "copy", h_ts],
-                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                )
-
-            # Cleanup temp files
-            for tf in h_ts_parts:
-                if os.path.exists(tf):
-                    os.remove(tf)
-            for i in range(len(items)):
-                for ext_f in [f"h_v2_silent_{rank}_{i}.mp4", f"h_v2_trans_{rank}_{i}.mp4"]:
-                    if os.path.exists(ext_f):
-                        os.remove(ext_f)
-
-        elif hook_enabled:
-            get_x_h = None
-            if use_split:
-                print("   📸 [Hook] Split-screen render (the custom hook is ignored or merged for this format)...")
-                get_x_h = render_split_screen_video(
-                    file_hook_src,
-                    h_silent,
-                    h_start,
-                    h_end,
-                    ratio,
-                    diarization_data if not custom_hook else None,
-                    cfg,
-                    label=f"Rank {rank} Hook SplitScreen",
-                )
-            elif use_camera_switch:
-                print("   📸 [Hook] Camera switch render...")
-                get_x_h = render_camera_switch_video(
-                    file_hook_src,
-                    h_silent,
-                    h_start,
-                    h_end,
-                    ratio,
-                    diarization_data if not custom_hook else None,
-                    cfg,
-                    label=f"Rank {rank} Hook CameraSwitch",
-                )
-            else:
-                print("   📸 [Hook] Hybrid render...")
-                get_x_h = render_hybrid_video(
-                    file_hook_src,
-                    h_silent,
-                    h_start,
-                    h_end,
-                    ratio,
-                    cfg,
-                    label=f"Rank {rank} Hook",
-                )
-            
-            advanced_hook_enabled = cfg.use_advanced_text_on_hook
+            vf_hook = []
             if not cfg.no_subs and not custom_hook:
                 build_ass_file(
-                    data_segments,
-                    h_start,
-                    h_end,
-                    a_hook,
-                    ratio,
-                    cfg,
-                    typography_plan=typography_plan,
-                    use_advanced=advanced_hook_enabled,
-                    get_x_func=get_x_h,
-                    source_dim=source_dim,
+                    data_segments, h_start, h_end, a_hook, ratio, cfg,
+                    typography_plan=typography_plan, source_dim=source_dim,
+                    title_overlay=title_overlay,
                 )
-
-                print("   🎬 [Hook] FFmpeg burn subtitle + audio...")
-                esc_ass_hook = escape_ffmpeg_filter_value(os.path.abspath(a_hook))
-                esc_fontsdir = escape_ffmpeg_filter_value(os.path.abspath(cfg.font_dir))
-                vf_hook_list = [f"subtitles={esc_ass_hook}:fontsdir={esc_fontsdir}"]
-            else:
-                print(f"   🎬 [Hook] Skip subtitle rendering {'(Custom Hook)' if custom_hook else ''}...")
-                vf_hook_list = []
-            
+                vf_hook.append(_subtitle_filter(a_hook, cfg))
             if cfg.video_sharpen:
-                vf_hook_list.append("unsharp=5:5:0.5:5:5:0.0")
-            
-            vf_hook = ",".join(vf_hook_list) if vf_hook_list else None
+                vf_hook.append(SHARPEN_FILTER)
 
-            cmd_h_base = [
-                "ffmpeg",
-                "-hide_banner",
-                "-loglevel",
-                "verbose",
-                "-y",
-                "-i",
-                h_silent,
-                "-ss",
-                str(h_start),
-                "-to",
-                str(h_end),
-                "-i",
-                file_hook_src,
-                "-map",
-                "0:v:0",
-                "-map",
-                "1:a:0",
+            cmd_h = [
+                "ffmpeg", "-hide_banner", "-loglevel", "verbose", "-y",
+                "-i", h_silent,
+                "-ss", str(h_start), "-to", str(h_end), "-i", file_hook_src,
+                "-map", "0:v:0", "-map", "1:a:0", "-af", LOUDNORM_FILTER,
             ]
             if vf_hook:
-                cmd_h_base += ["-vf", vf_hook]
-            cmd_h_base += std_p
+                cmd_h += ["-vf", ",".join(vf_hook)]
+            _run_checked(cmd_h + std_p, h_ts, h_end - h_start, f"Rank {rank} Hook FFmpeg")
 
-            cmd_h = build_ffmpeg_progress_cmd(cmd_h_base, h_ts)
-            rc_h, err_h = run_ffmpeg_with_progress(
-                cmd_h, h_end - h_start, label=f"Rank {rank} Hook FFmpeg"
-            )
-            if rc_h != 0:
-                raise RuntimeError("The FFmpeg hook pass failed:\n" + "\n".join(err_h))
-
-        # MAIN
-        keep_segments = clip.get("keep_segments")
-        use_segments = (
-            keep_segments
-            and len(keep_segments) > 1
-            and not getattr(cfg, "no_segment_trim", False)
-        )
-
+        # ---- MAIN: smart-trim segments --------------------------------------------
         if use_segments:
             print(f"   📸 [Main] Rendering {len(keep_segments)} segments (smart trim)...")
             seg_ts_parts = []
 
             for idx, seg in enumerate(keep_segments):
-                s_start = float(seg["start_time"])
-                s_end = float(seg["end_time"])
+                s_start, s_end = float(seg["start_time"]), float(seg["end_time"])
                 s_silent = f"m_seg_silent_{rank}_{idx}.mp4"
                 s_ass = f"m_seg_ass_{rank}_{idx}.ass"
                 s_ts = f"m_seg_ts_{rank}_{idx}.ts"
 
-                # Render visual per segment
-                if use_split:
-                    get_x_main = render_split_screen_video(
-                        cfg.source_video_path, s_silent, s_start, s_end,
-                        ratio, diarization_data, cfg,
-                        label=f"Rank {rank} Seg {idx} SplitScreen",
-                        broll_data=active_broll,
-                    )
-                elif use_camera_switch:
-                    get_x_main = render_camera_switch_video(
-                        cfg.source_video_path, s_silent, s_start, s_end,
-                        ratio, diarization_data, cfg,
-                        label=f"Rank {rank} Seg {idx} CameraSwitch",
-                        broll_data=active_broll,
-                    )
-                else:
-                    get_x_main = render_hybrid_video(
-                        cfg.source_video_path, s_silent, s_start, s_end,
-                        ratio, cfg, active_broll,
-                        label=f"Rank {rank} Seg {idx} Hybrid",
-                    )
+                _render_visual(
+                    cfg, ratio, cfg.source_video_path, s_silent, s_start, s_end,
+                    f"Rank {rank} Seg {idx}", broll=active_broll, **render_modes,
+                )
 
-                # Subtitle for this segment
+                vf_seg = []
                 if not cfg.no_subs:
                     build_ass_file(
                         data_segments, s_start, s_end, s_ass, ratio, cfg,
-                        typography_plan=typography_plan, use_advanced=True,
-                        get_x_func=get_x_main, source_dim=source_dim,
+                        typography_plan=typography_plan, source_dim=source_dim,
+                        title_overlay=main_overlay if idx == 0 else None,
                     )
-
-                esc_ass_seg = escape_ffmpeg_filter_value(os.path.abspath(s_ass)) if not cfg.no_subs else ""
-                esc_fontsdir_seg = escape_ffmpeg_filter_value(os.path.abspath(cfg.font_dir))
-
-                vf_seg_parts = [f"subtitles={esc_ass_seg}:fontsdir={esc_fontsdir_seg}"] if not cfg.no_subs else []
+                    vf_seg.append(_subtitle_filter(s_ass, cfg))
                 if cfg.video_sharpen:
-                    vf_seg_parts.append("unsharp=5:5:0.5:5:5:0.0")
+                    vf_seg.append(SHARPEN_FILTER)
 
                 cmd_s = [
                     "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
                     "-i", s_silent,
-                    "-ss", str(s_start), "-to", str(s_end),
-                    "-i", cfg.source_video_path,
-                    "-map", "0:v:0", "-map", "1:a:0",
+                    "-ss", str(s_start), "-to", str(s_end), "-i", cfg.source_video_path,
+                    "-map", "0:v:0", "-map", "1:a:0", "-af", LOUDNORM_FILTER,
                 ]
-                if vf_seg_parts:
-                    cmd_s += ["-vf", ",".join(vf_seg_parts)]
-                cmd_s += std_p
-
-                cmd_s_full = build_ffmpeg_progress_cmd(cmd_s, s_ts)
-                run_ffmpeg_with_progress(
-                    cmd_s_full, s_end - s_start,
-                    label=f"Rank {rank} Seg FFmpeg {idx}",
-                )
+                if vf_seg:
+                    cmd_s += ["-vf", ",".join(vf_seg)]
+                _run_checked(cmd_s + std_p, s_ts, s_end - s_start, f"Rank {rank} Seg FFmpeg {idx}")
                 seg_ts_parts.append(s_ts)
 
-            # Concat all segments into m_ts
-            concat_str_seg = "concat:" + "|".join(seg_ts_parts)
-            subprocess.run(
-                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                 "-i", concat_str_seg, "-c", "copy", m_ts],
-                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
+            _concat_ts(seg_ts_parts, m_ts)
 
-            # Cleanup segment temps
-            for tf in seg_ts_parts:
-                if os.path.exists(tf):
-                    os.remove(tf)
-            for idx in range(len(keep_segments)):
-                for ext_f in [f"m_seg_silent_{rank}_{idx}.mp4", f"m_seg_ass_{rank}_{idx}.ass"]:
-                    if os.path.exists(ext_f):
-                        os.remove(ext_f)
-
-            # Skip the standard MAIN render + subtitle/BGM encoding loop
-            # and go directly to BGM application on the concatenated result
-            bgm_enabled = cfg.use_auto_bgm
-            bgm_mood = clip.get("bgm_mood", "chill")
-            if bgm_mood not in getattr(cfg, "bgm_moods", ["chill"]):
-                bgm_mood = "chill"
-            
-            file_bgm = None
-            if bgm_enabled:
-                print(f"   🎵 Looking for a local BGM file (mood: {bgm_mood})...")
-                file_bgm = get_local_bgm_file(bgm_mood, getattr(cfg, "bgm_dir", os.path.join(cfg.base_dir, "assets", "bgm")))
-                if not file_bgm and bgm_mood != "chill":
-                    print("   🔄 Falling back to the chill BGM...")
-                    file_bgm = get_local_bgm_file("chill", getattr(cfg, "bgm_dir", os.path.join(cfg.base_dir, "assets", "bgm")))
-                
-                if file_bgm:
-                    print(f"   ✅ BGM ready: {file_bgm}")
-                else:
-                    print("   ⚠️ The BGM folder is empty or has no mp3 files. Rendering without BGM.")
-
-            if bgm_enabled and file_bgm:
-                print("   🎵 Applying BGM to segmented clip...")
+            if file_bgm:
+                print("   🎵 Applying BGM to the trimmed clip...")
                 m_ts_bgm = f"m_bgm_{rank}.ts"
-                seg_total_dur = sum(float(s["end_time"]) - float(s["start_time"]) for s in keep_segments)
-                bgm_mode = getattr(cfg, "bgm_mode", "ducking")
-                filter_complex_seg = build_bgm_filter(
-                    bgm_mode, cfg.bgm_base_volume,
-                    audio_input_voc="[0:a]", audio_input_bgm="[1:a]"
-                )
-                cmd_bgm_seg = [
+                cmd_bgm = [
                     "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                    "-i", m_ts,
-                    "-stream_loop", "-1", "-i", file_bgm,
-                    "-filter_complex", filter_complex_seg,
+                    "-i", m_ts, "-stream_loop", "-1", "-i", file_bgm,
+                    "-filter_complex", build_bgm_filter(
+                        getattr(cfg, "bgm_mode", "ducking"), cfg.bgm_base_volume,
+                        audio_input_voc="[0:a]", audio_input_bgm="[1:a]",
+                    ),
                     "-map", "0:v:0", "-map", "[a_out]", "-shortest",
-                ] + std_p
-                run_ffmpeg_with_progress(
-                    build_ffmpeg_progress_cmd(cmd_bgm_seg, m_ts_bgm),
-                    seg_total_dur, label=f"Rank {rank} Seg BGM",
-                )
-                # Replace m_ts with the BGM version
+                ] + _COPY_VIDEO_TS_ARGS
+                _run_checked(cmd_bgm, m_ts_bgm, rendered_duration, f"Rank {rank} Seg BGM")
                 os.replace(m_ts_bgm, m_ts)
 
+        # ---- MAIN: full span -------------------------------------------------------
         else:
-            # Standard MAIN render (full start_time → end_time)
-            if use_split:
-                print("   📸 [Main] Split-screen render (Visual)...")
-                get_x_main = render_split_screen_video(
-                    cfg.source_video_path,
-                    m_silent,
-                    m_start,
-                    m_end,
-                    ratio,
-                    diarization_data,
-                    cfg,
-                    label=f"Rank {rank} Main SplitScreen",
-                    broll_data=active_broll,
-                )
-            elif use_camera_switch:
-                # Note: Camera Switch doesn't currently support dev_mode frames but we pass it anyway
-                print("   📸 [Main] Camera switch render (Visual)...")
-                get_x_main = render_camera_switch_video(
-                    cfg.source_video_path,
-                    m_silent,
-                    m_start,
-                    m_end,
-                    ratio,
-                    diarization_data,
-                    cfg,
-                    label=f"Rank {rank} Main CameraSwitch",
-                    broll_data=active_broll,
-                )
-            else:
-                print("   📸 [Main] Hybrid render (Visual)...")
-                get_x_main = render_hybrid_video(
-                    cfg.source_video_path,
-                    m_silent,
-                    m_start,
-                    m_end,
-                    ratio,
-                    cfg,
-                    active_broll,
-                    label=f"Rank {rank} Main",
-                )
+            print("   📸 [Main] Rendering the clip...")
+            _render_visual(
+                cfg, ratio, cfg.source_video_path, m_silent, m_start, m_end,
+                f"Rank {rank} Main", broll=active_broll, **render_modes,
+            )
 
-            vo_data = clip.get("voiceover")
-            
+            vf_main = []
             if not cfg.no_subs:
                 build_ass_file(
-                    data_segments,
-                    m_start,
-                    m_end,
-                    a_main,
-                    ratio,
-                    cfg,
-                    typography_plan=typography_plan,
-                    use_advanced=True,
-                    get_x_func=get_x_main,
-                    source_dim=source_dim,
+                    data_segments, m_start, m_end, a_main, ratio, cfg,
+                    typography_plan=typography_plan, source_dim=source_dim,
+                    title_overlay=main_overlay,
                 )
+                vf_main.append(_subtitle_filter(a_main, cfg))
+            if cfg.video_sharpen:
+                vf_main.append(SHARPEN_FILTER)
 
-            print(f"   🎬 [Main] FFmpeg {'skip subtitle' if cfg.no_subs else 'burn subtitle'}...")
-            esc_ass_main = escape_ffmpeg_filter_value(os.path.abspath(a_main)) if not cfg.no_subs else ""
-            esc_fontsdir = escape_ffmpeg_filter_value(os.path.abspath(cfg.font_dir))
-
-            # SMART BGM
-            bgm_enabled = cfg.use_auto_bgm
-            bgm_mood = clip.get("bgm_mood", "chill")
-            if bgm_mood not in getattr(cfg, "bgm_moods", ["chill"]):
-                bgm_mood = "chill"
-                
-            file_bgm = None
-            if bgm_enabled:
-                print(f"   🎵 Looking for a local BGM file (mood: {bgm_mood})...")
-                file_bgm = get_local_bgm_file(bgm_mood, getattr(cfg, "bgm_dir", os.path.join(cfg.base_dir, "assets", "bgm")))
-                if not file_bgm and bgm_mood != "chill":
-                    print("   🔄 Falling back to the chill BGM...")
-                    file_bgm = get_local_bgm_file("chill", getattr(cfg, "bgm_dir", os.path.join(cfg.base_dir, "assets", "bgm")))
-                
-                if file_bgm:
-                    print(f"   ✅ BGM ready: {file_bgm}")
-                else:
-                    print("   ⚠️ The BGM folder is empty or has no mp3 files. Rendering without BGM.")
-
-            # --- Subtitle & BGM Encoding Loop (Handles dual output files if needed) ---
-            runs = [m_silent] if not dev_dual else [m_silent, m_silent_dev]
-            out_targets = [m_ts] if not dev_dual else [m_ts, m_ts_dev]
-            
-            for input_silent_ts, output_final_ts in zip(runs, out_targets):
-                lbl_suffix = "" if input_silent_ts == m_silent else " (DEV)"
-                
-                v_filter_parts = [f"subtitles={esc_ass_main}:fontsdir={esc_fontsdir}"] if not cfg.no_subs else []
-                if cfg.video_sharpen:
-                    v_filter_parts.append("unsharp=5:5:0.5:5:5:0.0")
-                
-                v_filter = ",".join(v_filter_parts) if v_filter_parts else "null"
-
-                # Initialize FFmpeg command
-                cmd_m_base = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "verbose", "-y",
-                    "-i", input_silent_ts,
-                    "-ss", str(m_start), "-to", str(m_end),
-                    "-i", cfg.source_video_path
+            print(f"   🎬 [Main] FFmpeg {'burn subtitles' if not cfg.no_subs else 'mux audio'}...")
+            cmd_m = [
+                "ffmpeg", "-hide_banner", "-loglevel", "verbose", "-y",
+                "-i", m_silent,
+                "-ss", str(m_start), "-to", str(m_end), "-i", cfg.source_video_path,
+            ]
+            if file_bgm:
+                cmd_m += ["-stream_loop", "-1", "-i", file_bgm]
+                audio_filter = build_bgm_filter(
+                    getattr(cfg, "bgm_mode", "ducking"), cfg.bgm_base_volume,
+                    audio_input_voc="[1:a]", audio_input_bgm="[2:a]",
+                )
+                cmd_m += [
+                    "-filter_complex", f"[0:v]{','.join(vf_main) or 'null'}[v_out]; {audio_filter}",
+                    "-map", "[v_out]", "-map", "[a_out]", "-shortest",
                 ]
+            else:
+                cmd_m += ["-map", "0:v:0", "-map", "1:a:0", "-af", LOUDNORM_FILTER]
+                if vf_main:
+                    cmd_m += ["-vf", ",".join(vf_main)]
+            _run_checked(cmd_m + std_p, m_ts, m_end - m_start, f"Rank {rank} Main FFmpeg")
 
-                # Map inputs
-                input_idx_bgm = -1
-                
-                if bgm_enabled and file_bgm:
-                    cmd_m_base.extend(["-stream_loop", "-1", "-i", file_bgm])
-                    input_idx_bgm = 2
-                    
-                if input_idx_bgm != -1:
-                    # Only BGM, no VO
-                    bgm_mode = getattr(cfg, "bgm_mode", "ducking")
-                    audio_filter = build_bgm_filter(
-                        bgm_mode, cfg.bgm_base_volume,
-                        audio_input_voc="[1:a]", audio_input_bgm=f"[{input_idx_bgm}:a]"
-                    )
-                    filter_complex = f"[0:v]{v_filter}[v_out]; {audio_filter}"
-                    
-                    cmd_m_base.extend([
-                        "-filter_complex", filter_complex,
-                        "-map", "[v_out]", "-map", "[a_out]", "-shortest"
-                    ])
-                    
-                else:
-                    # No BGM — just original audio with subtitles
-                    cmd_m_base.extend(["-map", "0:v:0", "-map", "1:a:0"])
-                    if v_filter != "null":
-                        cmd_m_base.extend(["-vf", v_filter])
-                        
-                cmd_m_base += std_p
+        # ---- VOICE-OVER INTRO --------------------------------------------------------
+        vo_ts = _render_voiceover_intro(
+            rank, ratio, cfg, clip.get("voiceover"), std_p, source_dim,
+            typography_plan, file_bgm, m_start,
+        )
 
-                cmd_m = build_ffmpeg_progress_cmd(cmd_m_base, output_final_ts)
-                rc_m, err_m = run_ffmpeg_with_progress(
-                    cmd_m, m_end - m_start, label=f"Rank {rank} Main FFmpeg{lbl_suffix}"
-                )
-                if rc_m != 0:
-                    raise RuntimeError(f"The FFmpeg main{lbl_suffix} pass failed:\n" + "\n".join(err_m))
-
-        # VOICE-OVER INTRO GENERATION
-        vo_ts = None
-        vo_ts_dev = None
-        vo_data = clip.get("voiceover")
-        if vo_data and os.path.exists(vo_data["audio_path"]):
-            vo_ts = os.path.join(cfg.outputs_dir, f"vo_intro_{rank}.ts")
-            vo_ts_dev = os.path.join(cfg.outputs_dir, f"vo_intro_{rank}_dev.ts")
-            print("   📸 [VO] Render voice-over intro (freeze frame + equalizer)...")
-            
-            # Extract first frame
-            frame_path = os.path.join(cfg.outputs_dir, f"vo_bg_{rank}.jpg")
-            try:
-                subprocess.run([
-                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                    "-ss", str(m_start), "-i", cfg.source_video_path,
-                    "-vframes", "1", "-q:v", "2", frame_path
-                ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-            except subprocess.CalledProcessError as e:
-                raise RuntimeError(f"Could not extract the opening frame for the VO intro:\n{e.stderr}")
-            
-            try:
-                # Read the real mp3 duration with ffprobe so the intro is not cut short.
-                res = subprocess.run([
-                    "ffprobe", "-v", "error", "-show_entries", "format=duration",
-                    "-of", "default=noprint_wrappers=1:nokey=1", vo_data["audio_path"]
-                ], stdout=subprocess.PIPE, text=True, check=True)
-                vo_duration = float(res.stdout.strip()) + 0.5
-            except Exception:
-                vo_duration = float(vo_data["segments"][-1]["end"]) + 0.5 if vo_data.get("segments") else 5.0
-            
-            # Generate for both normal and dev dual if needed
-            out_targets_vo = [vo_ts] if not dev_dual else [vo_ts, vo_ts_dev]
-            
-            for output_vo_ts in out_targets_vo:
-                vo_w, vo_h = _get_render_dims(cfg, ratio, source_h=sh)
-                if dev_dual and output_vo_ts == vo_ts_dev:
-                    vo_w, vo_h = 1920, 1080
-                elif getattr(cfg, "dev_mode_with_output_merge", False):
-                    vo_w, vo_h = 2648, 1220
-                elif getattr(cfg, "dev_mode", False) and not dev_dual:
-                    vo_w, vo_h = 1920, 1080
-                    
-                ass_vo_filter = ""
-                overlay_out = "[v_out]"
-                
-                # Build a dedicated ASS subtitle file for the VO intro when segments exist.
-                if not cfg.no_subs and vo_data.get("segments"):
-                    ass_vo = os.path.join(cfg.outputs_dir, f"vo_subs_{rank}.ass")
-                    build_ass_file(
-                        vo_data["segments"],
-                        0.0,  # times are relative to 0 because this is a separate file
-                        vo_duration,
-                        ass_vo,
-                        ratio,
-                        cfg,
-                        typography_plan=typography_plan,
-                        use_advanced=True,
-                        get_x_func=get_x_main,
-                        source_dim=(vo_w, vo_h) 
-                    )
-                    esc_ass_vo = escape_ffmpeg_filter_value(os.path.abspath(ass_vo))
-                    esc_fontsdir_vo = escape_ffmpeg_filter_value(os.path.abspath(cfg.font_dir))
-                    ass_vo_filter = f"; [v_over]subtitles={esc_ass_vo}:fontsdir={esc_fontsdir_vo}[v_out]"
-                    overlay_out = "[v_over]"
-
-                # Generate edge glow overlay video
-                glow_path = os.path.join(cfg.outputs_dir, f"vo_glow_{rank}.mp4")
-                glow_mode = getattr(cfg, "edge_glow_mode", "smooth")
-                print(f"   ✨ [VO] Generating ambient edge glow (mode={glow_mode})...")
-
-                if glow_mode == "full":
-                    # Render full duration — no loop needed, zero stutter
-                    glow_dur = vo_duration
-                    glow_seamless = False
-                    glow_needs_loop = False
-                elif glow_mode == "smooth":
-                    # 10s loop with seamless speed adjustment
-                    glow_dur = min(10.0, vo_duration)
-                    glow_seamless = True
-                    glow_needs_loop = glow_dur < vo_duration
-                else:  # "default" — original behavior
-                    glow_dur = min(10.0, vo_duration)
-                    glow_seamless = False
-                    glow_needs_loop = glow_dur < vo_duration
-
-                generate_edge_glow_video(
-                    glow_path, vo_w, vo_h,
-                    duration=glow_dur,
-                    fps=30,
-                    glow_speed=0.15,
-                    opacity=0.45,
-                    seamless_loop=glow_seamless,
-                )
-
-                # Build filter: bg_frame → overlay glow → overlay spectrum → [subtitles]
-                
-                # =========================
-                # Manual Wave/Spectrum Config
-                # =========================
-                
-                wave_enabled = True
-                
-                # Waveform size.
-                wave_w = 800
-                wave_h = 260
-                
-                # Smoothness visual
-                # Use 30 for a 30fps final render, 60 for a 60fps one.
-                wave_rate = 30
-                
-                # Keep the waveform from looking too busy.
-                wave_lowpass = 300      # 250-400 works well for voice-over
-                wave_use_lowpass = True
-                
-                # Appearance
-                wave_mode = "cline"     # cline is smoother, line is sharper
-                wave_color = "0x00FFFF"
-                wave_scale = "sqrt"     # sqrt is calmer than linear
-                # Alternative scales:
-                # "lin"  = linear/default: truest waveform, but can look busy/aggressive
-                # "sqrt" = smoother and more balanced, a good fit for voice-over
-                # "cbrt" = softer still than sqrt, for when the waveform is too busy
-                # "log"  = small details stand out more, but can end up looking busy
-                
-                
-                # Waveform transparency
-                wave_alpha = 0.65       # 0.4-0.8; lower is softer
-                
-                # Waveform overlay position.
-                wave_x = "(W-w)/2"
-                wave_y = "(H-h)/2"
-                
-                # Colorkey removes the black background showwaves produces.
-                wave_key_color = "0x000000"
-                wave_key_similarity = 0.1
-                wave_key_blend = 0.1
-                
-
-                if wave_use_lowpass:
-                    wave_audio_filter = f"[vo_wave_in]lowpass=f={wave_lowpass}"
-                else:
-                    wave_audio_filter = "[vo_wave_in]anull"
-                
-                wave_filter = (
-                    f"{wave_audio_filter},"
-                    f"showwaves="
-                    f"s={wave_w}x{wave_h}:"
-                    f"mode={wave_mode}:"
-                    f"colors={wave_color}:"
-                    f"rate={wave_rate}:"
-                    f"scale={wave_scale},"
-                    f"format=rgba,"
-                    f"colorkey={wave_key_color}:{wave_key_similarity}:{wave_key_blend},"
-                    f"colorchannelmixer=aa={wave_alpha}"
-                    f"[wave_v]; "
-                )
-
-                # Build filter: bg_frame → overlay glow → overlay spectrum → [subtitles]
-                # Input 0: freeze frame (looped)
-                # Input 1: VO audio
-                # Input 2: edge glow video (stream_looped)
-                # Input 3 (optional): BGM
-                
-                v_filter_vo = (
-                    f"[0:v]scale={vo_w}:{vo_h}:force_original_aspect_ratio=increase,"
-                    f"crop={vo_w}:{vo_h},"
-                    f"colorchannelmixer=rr=0.3:gg=0.3:bb=0.3[v_bg]; "
-                
-                    f"[2:v]scale={vo_w}:{vo_h}[glow_scaled]; "
-                
-                    f"[v_bg][glow_scaled]blend=all_mode=screen:shortest=1[v_glowed]; "
-                
-                    f"[1:a]asplit=2[vo_a][vo_wave_in]; "
-                
-                    f"{wave_filter}"
-                
-                    f"[v_glowed][wave_v]overlay={wave_x}:{wave_y}:shortest=1{overlay_out}"
-                    f"{ass_vo_filter}"
-                )
-                
-                cmd_vo_base = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                    "-loop", "1", "-framerate", "30", "-i", frame_path,
-                    "-i", vo_data["audio_path"],
-                ]
-                if glow_needs_loop:
-                    cmd_vo_base.extend(["-stream_loop", "-1", "-i", glow_path])
-                else:
-                    cmd_vo_base.extend(["-i", glow_path])
-                
-                # Audio mixing with BGM for VO intro
-                # Input indices: 0=frame, 1=audio, 2=glow, 3=bgm (if present)
-                if bgm_enabled and file_bgm:
-                    cmd_vo_base.extend(["-stream_loop", "-1", "-i", file_bgm])
-                    bgm_vol = cfg.bgm_base_volume
-                    vo_vol = getattr(cfg, "voiceover_volume", 1.0)
-                    audio_filter_vo = (
-                        f"[3:a]volume={bgm_vol}[bgm_vol]; "
-                        f"[vo_a]volume={vo_vol}[vo_loud]; "
-                        f"[bgm_vol][vo_loud]amix=inputs=2:duration=first:dropout_transition=2[a_out]"
-                    )
-                    v_filter_vo += f"; {audio_filter_vo}"
-                else:
-                    vo_vol = getattr(cfg, "voiceover_volume", 1.0)
-                    v_filter_vo += f"; [vo_a]volume={vo_vol}[a_out]"
-                    
-                cmd_vo_base.extend([
-                    "-filter_complex", v_filter_vo,
-                    "-map", "[v_out]", "-map", "[a_out]", "-t", str(vo_duration)
-                ])
-                cmd_vo_base += std_p
-                cmd_vo_base.append(output_vo_ts)
-                
-                try:
-                    subprocess.run(cmd_vo_base, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-                except subprocess.CalledProcessError as e:
-                    raise RuntimeError(f"The FFmpeg VO intro pass failed (rank {rank}):\nCommand: {' '.join(cmd_vo_base)}\nError:\n{e.stderr}")
-                
-            if os.path.exists(frame_path):
-                os.remove(frame_path)
-            if os.path.exists(glow_path):
-                os.remove(glow_path)
-
-
-        # FINAL CONCAT
+        # ---- FINAL CONCAT --------------------------------------------------------------
         print("   🔗 [Final] Finalising the clip...")
-        
-        # Calculate target dimensions for each run
-        out_w_std, out_h_std = _get_render_dims(cfg, ratio, source_h=sh)
-        if getattr(cfg, "dev_mode_with_output_merge", False):
-            out_w_std, out_h_std = 2648, 1220
-        elif getattr(cfg, "dev_mode", False) and not dev_dual:
-            # Single stream pure dev mode
-            out_w_std, out_h_std = 1920, 1080
-            
-        concat_runs = [(out_vid, m_ts, h_ts, (out_w_std, out_h_std))]
-        if dev_dual:
-            out_vid_dev = os.path.join(cfg.outputs_dir, f"highlight_rank_{rank}_dev_mode_ready.mp4")
-            # Usually hook doesn't generate dual, so we fallback to standard hook for dev if missing
-            h_dev_target = h_ts_dev if os.path.exists(h_ts_dev) else h_ts 
-            concat_runs.append((out_vid_dev, m_ts_dev, h_dev_target, (1920, 1080)))
-            
-        for final_path, main_vid_ts, hook_vid_ts, dims in concat_runs:
-            vo_vid_ts = vo_ts_dev if (dev_dual and final_path.endswith("_dev_mode_ready.mp4")) else vo_ts
-            
-            # Determine concat strategy
-            parts = []
-            
-            # 1. Hook
-            if use_hook_v2 and os.path.exists(hook_vid_ts):
-                parts.append(hook_vid_ts)
-            elif hook_enabled and os.path.exists(hook_vid_ts):
-                parts.append(hook_vid_ts)
-                cur_glitch = prepare_glitch_video(ratio, cfg, video_encoder, source_h=sh, custom_dims=dims)
-                if cur_glitch and os.path.exists(cur_glitch):
-                    parts.append(cur_glitch)
-                    
-            # 2. Voice-Over Intro
-            if vo_vid_ts and os.path.exists(vo_vid_ts):
-                parts.append(vo_vid_ts)
-                
-            # 3. Main Clip
-            parts.append(main_vid_ts)
+        parts = [
+            path for path in (h_ts if hook_enabled else None, vo_ts, m_ts)
+            if path and os.path.exists(path)
+        ]
+        _concat_ts(parts, out_vid, extra_args=("-bsf:a", "aac_adtstoasc"))
 
-            concat_str = "concat:" + "|".join(parts)
-
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-i",
-                    concat_str,
-                    "-c",
-                    "copy",
-                    "-bsf:a",
-                    "aac_adtstoasc",
-                    final_path,
-                ],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        # EDGE GLOW POST-PROCESSING (full clip)
-        if getattr(cfg, "edge_glow", False):
-            print("   ✨ [Edge Glow] Applying ambient edge glow to full clip...")
-            for final_path, _, _, dims in concat_runs:
-                if not os.path.exists(final_path):
-                    continue
-                gw, gh = dims
-                # Get video duration via ffprobe
-                try:
-                    dur_res = subprocess.run([
-                        "ffprobe", "-v", "error", "-show_entries", "format=duration",
-                        "-of", "default=noprint_wrappers=1:nokey=1", final_path
-                    ], stdout=subprocess.PIPE, text=True, check=True)
-                    clip_dur = float(dur_res.stdout.strip())
-                except Exception:
-                    clip_dur = 60.0
-
-                glow_full_path = os.path.join(cfg.outputs_dir, f"glow_full_{rank}.mp4")
-                glow_mode_fc = getattr(cfg, "edge_glow_mode", "smooth")
-
-                if glow_mode_fc == "full":
-                    glow_fc_dur = clip_dur
-                    glow_fc_seamless = False
-                    glow_fc_needs_loop = False
-                elif glow_mode_fc == "smooth":
-                    glow_fc_dur = min(10.0, clip_dur)
-                    glow_fc_seamless = True
-                    glow_fc_needs_loop = glow_fc_dur < clip_dur
-                else:  # "default"
-                    glow_fc_dur = min(10.0, clip_dur)
-                    glow_fc_seamless = False
-                    glow_fc_needs_loop = glow_fc_dur < clip_dur
-
-                generate_edge_glow_video(
-                    glow_full_path, gw, gh,
-                    duration=glow_fc_dur,
-                    fps=30,
-                    glow_speed=0.15,
-                    opacity=0.45,
-                    seamless_loop=glow_fc_seamless,
-                )
-
-                # Overlay via FFmpeg blend=screen
-                tmp_glowed = final_path + ".glowed.mp4"
-                cmd_glow = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                    "-i", final_path,
-                ] + (["-stream_loop", "-1"] if glow_fc_needs_loop else []) + [
-                    "-i", glow_full_path,
-                    "-filter_complex",
-                    f"[1:v]scale={gw}:{gh}[glow]; [0:v][glow]blend=all_mode=screen:shortest=1[v_out]",
-                    "-map", "[v_out]", "-map", "0:a?",
-                    "-c:a", "copy",
-                    "-t", str(clip_dur),
-                ]
-                cmd_glow += std_p
-                cmd_glow.append(tmp_glowed)
-
-                try:
-                    subprocess.run(cmd_glow, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-                    os.replace(tmp_glowed, final_path)
-                    print(f"   ✅ [Edge Glow] Applied to {os.path.basename(final_path)}")
-                except subprocess.CalledProcessError as e:
-                    print(f"   ⚠️ [Edge Glow] Failed for {os.path.basename(final_path)}: {e.stderr[-300:]}")
-                    if os.path.exists(tmp_glowed):
-                        os.remove(tmp_glowed)
-                finally:
-                    if os.path.exists(glow_full_path):
-                        os.remove(glow_full_path)
-
-        thumbnail_title = title or f"Highlight {rank}"
-        build_thumbnail(out_vid, out_thm, thumbnail_title, cfg)
+        if out_thm:
+            build_thumbnail(out_vid, out_thm, title or f"Highlight {rank}", cfg)
 
         manifest_item["status"] = "success"
         manifest_item["video_exists"] = os.path.exists(out_vid)
-        manifest_item["thumbnail_exists"] = os.path.exists(out_thm)
-
+        manifest_item["thumbnail_exists"] = bool(out_thm) and os.path.exists(out_thm)
         print(f"✅ [Rank {rank}] Done.")
         return manifest_item
 
     except subprocess.CalledProcessError as e:
         print(f"\n❌ ERROR: FFmpeg failed: {e}")
-        manifest_item["status"] = "failed"
-        manifest_item["error"] = str(e)
-        manifest_item["video_exists"] = os.path.exists(out_vid)
-        manifest_item["thumbnail_exists"] = os.path.exists(out_thm)
-        return manifest_item
-
+        manifest_item.update(status="failed", error=str(e))
     except Exception as e:
         print(f"\n❌ ERROR: Unexpected failure. Error: {e}")
-        manifest_item["status"] = "failed"
-        manifest_item["error"] = str(e)
-        manifest_item["video_exists"] = os.path.exists(out_vid)
-        manifest_item["thumbnail_exists"] = os.path.exists(out_thm)
-        return manifest_item
-
+        manifest_item.update(status="failed", error=str(e))
     finally:
-        files_to_remove = [h_ts, m_ts, a_hook, a_main, h_silent, m_silent]
-        if dev_dual:
-            files_to_remove.extend([h_ts_dev, m_ts_dev, m_silent_dev])
+        # Runs after a successful return too: intermediates are several GB over a
+        # long queue, which filled the Colab disk when only failures cleaned up.
+        _cleanup(rank, cfg, keep_segments, active_broll)
 
-        # Voice-over intermediates. Rebuilt from rank rather than read from the
-        # locals above, which stay unbound if we fail before the VO step.
-        files_to_remove.extend(
-            os.path.join(cfg.outputs_dir, name)
-            for name in (
-                f"vo_intro_{rank}.ts",
-                f"vo_intro_{rank}_dev.ts",
-                f"vo_subs_{rank}.ass",
-                f"vo_bg_{rank}.jpg",
-            )
-        )
+    manifest_item["video_exists"] = os.path.exists(out_vid)
+    manifest_item["thumbnail_exists"] = bool(out_thm) and os.path.exists(out_thm)
+    return manifest_item
 
-        for br in active_broll:
-            files_to_remove.append(br["filepath"])
 
-        for f_path in files_to_remove:
-            if os.path.exists(f_path):
-                os.remove(f_path)
+def _cleanup(rank, cfg, keep_segments, active_broll):
+    files = [f"h_{rank}.ts", f"m_{rank}.ts", f"ah_{rank}.ass", f"am_{rank}.ass",
+             f"h_silent_{rank}.mp4", f"m_silent_{rank}.mp4", f"m_bgm_{rank}.ts"]
+    for idx in range(len(keep_segments or [])):
+        files += [f"m_seg_silent_{rank}_{idx}.mp4", f"m_seg_ass_{rank}_{idx}.ass",
+                  f"m_seg_ts_{rank}_{idx}.ts"]
+    files += [
+        os.path.join(cfg.outputs_dir, name)
+        for name in (f"vo_intro_{rank}.ts", f"vo_subs_{rank}.ass", f"vo_bg_{rank}.jpg")
+    ]
+    files += [br["filepath"] for br in active_broll]
+    for path in files:
+        if os.path.exists(path):
+            os.remove(path)

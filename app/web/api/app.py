@@ -38,19 +38,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — the local Vite dev servers plus the published GitHub Pages dashboard.
+# CORS — the Studio pages (docs/studio) served locally or from GitHub Pages.
 #
 # The Pages origin depends on who forked the repo, so it is configurable rather
 # than hardcoded: set STUDIO_ALLOWED_ORIGINS to a comma-separated list to add
-# your own (e.g. "https://<user>.github.io"). The defaults below cover a local
-# checkout and this repo's own Pages site.
+# your own (e.g. "https://<user>.github.io"). The defaults below cover
+# `python -m http.server 8080 --directory docs`, common editor live servers, and
+# this repo's own Pages site.
 DEFAULT_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "http://localhost:5175",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:5174",
-    "http://127.0.0.1:5175",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
     "https://pdrajan0x.github.io",
 ]
 

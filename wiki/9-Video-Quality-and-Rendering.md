@@ -88,7 +88,7 @@ python -m app.cli --url "VIDEO_URL" --video-cq 28 --video-crf 25
 Controls the speed vs. quality tradeoff of the encoding process:
 
 ### NVENC Presets (GPU)
-`p1` (fastest, lowest quality) → `p7` (slowest, highest quality)
+`p1` (fastest, lowest quality) → `p7` (slowest, highest quality). `auto` uses `p4`.
 
 ### x264 Presets (CPU)
 `ultrafast` → `superfast` → `veryfast` → `faster` → `fast` → `medium` → `slow` → `slower` → `veryslow`
@@ -109,7 +109,7 @@ python -m app.cli --url "VIDEO_URL" --video-preset veryfast
 
 | Value | Description |
 |---|---|
-| `auto` (default) | Resolution-aware: 4M (1080p), 8M (1440p), 12M (2K), 20M (4K) |
+| `auto` (default) | Resolution-aware: 4M (below 1080p), 8M (1080p), 12M (1440p), 20M (2160p) |
 | `8M` | Fixed 8 Mbps |
 | `12M` | Fixed 12 Mbps |
 
@@ -157,24 +157,18 @@ python -m app.cli --url "VIDEO_URL" --video-scale-algo lanczos
 
 ---
 
-## Ambient Edge Glow
+## How a Clip Is Rendered
 
-The engine can apply a dynamic ambient glow around the video edges (matching the video colors). By default, this is only active during the voice-over intro.
+Each clip is encoded twice: once for the framed video, then again when captions are burned in and the audio is mixed.
 
-```bash
-# Apply edge glow to the entire video
-python -m app.cli --url "VIDEO_URL" --edge-glow
-```
+1. **Framing** — a single FFmpeg pass crops (the crop position is a time expression following the camera path), or blur-fills, and scales the
+   source. Clips with B-roll inserts or a watermark use the frame-by-frame OpenCV renderer instead.
+2. **Intermediate quality** — that first file uses the encoder's fastest preset at near-transparent quality (CQ/CRF 16,
+   no bitrate cap), so the second encode does not compound compression artefacts.
+3. **Final pass** — captions, loudness normalisation (−14 LUFS) and background music, at the `--video-cq` /
+   `--video-crf` / `--video-bitrate` you choose.
 
-### Edge Glow Modes (`--edge-glow-mode`)
-
-The underlying animation engine loops the glow effect. You can choose the rendering strategy:
-
-| Mode | Description | Tradeoffs |
-|---|---|---|
-| `smooth` (default) | Mathematically adjusts rotation speed for a seamless 10-second loop. | Perfectly smooth, no stutter at loop boundaries. |
-| `full` | Renders the exact duration of the video (no looping needed). | Zero stutter, but computationally heavier for long clips. |
-| `default` | Strict 10-second loop using the original speed. | May exhibit a slight visible stutter at the 10s mark. |
+The encoder test (NVENC → AMF → VAAPI → libx264) runs once per session and is reused for every clip part.
 
 ---
 

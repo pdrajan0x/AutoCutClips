@@ -26,6 +26,8 @@ metadata_preview.json
 credentials.json
 youtube_token.json
 .credentials/
+cookies*.txt
+links.txt
 
 # User Local Caches & Workspaces
 .cache/

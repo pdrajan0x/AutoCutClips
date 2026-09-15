@@ -110,11 +110,19 @@ python -m app.cli --url "VIDEO_URL" --source-height 1080
 
 ---
 
-### 🔴 Glitch Transition Disappears (High Resolution)
+### 🔴 "Sign in to confirm you're not a bot"
 
-**Error:** Hook glitch teaser is invisible or glitchy at 2K/4K resolution.
+**Error:** yt-dlp fails to download a YouTube video, typically on Colab or Kaggle.
 
-**Fix:** This was fixed in v0.9.11. Ensure you're using the latest version. The glitch video now dynamically scales to match output dimensions.
+**Fix:** YouTube blocks many datacenter IPs. Export `cookies.txt` (Netscape format) from a browser logged in to
+YouTube and pass it with `--cookies cookies.txt` or `YTDLP_COOKIES_FILE`. See the [Google Colab Guide](Google-Colab-Guide).
+
+---
+
+### 🔴 The camera frames the wrong person in a podcast
+
+**Fix:** Speaker following needs both mouths visible. Try `--face-detector yolo` for small or angled faces, or use
+`--camera-switch` (audio diarization, needs `HF_TOKEN`). `--no-speaker-tracking` falls back to position-based tracking.
 
 ---
 

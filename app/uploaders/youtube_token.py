@@ -9,6 +9,10 @@ Two subcommands:
         project needs, and writes .credentials/youtube_token.json. Run it the
         first time, or whenever the token breaks or you want to switch account.
 
+    python -m app.uploaders.youtube_token generate --manual
+        Same, for machines without a browser (Colab/Kaggle): prints a login
+        link and asks you to paste back the URL the browser was redirected to.
+
     python -m app.uploaders.youtube_token verify
         Refreshes the stored token and prints the channel it resolves to, so you
         can confirm the credentials still work without uploading anything.
@@ -68,6 +72,50 @@ def generate_token(client_secret_file: str = CLIENT_SECRET_FILE,
     return token_file
 
 
+def generate_token_manual(client_secret_file: str = CLIENT_SECRET_FILE,
+                          token_file: str = TOKEN_FILE,
+                          pasted_url: str | None = None) -> str:
+    """
+    Run the OAuth flow without a local browser (Colab, Kaggle, SSH).
+
+    Open the printed link, approve access, and the browser is sent to a
+    ``http://localhost`` page that fails to load — that is expected. Copy the
+    full address from the address bar and paste it back. The ``code`` in that
+    URL is exchanged for a token with a refresh_token.
+    """
+    from urllib.parse import parse_qs, urlparse
+
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    if not os.path.exists(client_secret_file):
+        raise FileNotFoundError(
+            f"{client_secret_file} not found. Download the OAuth client ID JSON "
+            "(Desktop app) from Google Cloud and put it there."
+        )
+
+    os.makedirs(os.path.dirname(token_file) or ".", exist_ok=True)
+
+    flow = InstalledAppFlow.from_client_secrets_file(client_secret_file, scopes=YOUTUBE_SCOPES)
+    flow.redirect_uri = "http://localhost:1"
+    auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent")
+
+    if pasted_url is None:
+        print("1. Open this link and approve access with the channel's Google account:\n")
+        print(f"   {auth_url}\n")
+        print("2. The browser then shows 'This site can't be reached' — that is expected.")
+        print("   Copy the FULL address from the address bar and paste it below.\n")
+        pasted_url = input("Paste the redirected URL: ").strip()
+
+    code = parse_qs(urlparse(pasted_url).query).get("code", [pasted_url])[0]
+    flow.fetch_token(code=code)
+
+    with open(token_file, "w", encoding="utf-8") as f:
+        f.write(flow.credentials.to_json())
+
+    print(f"✅ Token created: {token_file}")
+    return token_file
+
+
 def verify_token(token_file: str = TOKEN_FILE) -> None:
     """Refresh the stored token and print the channel it belongs to."""
     from google.auth.transport.requests import Request
@@ -120,6 +168,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Path of the YouTube OAuth token JSON.")
     p.add_argument("--client-secret", default=CLIENT_SECRET_FILE,
                    help="Path of the Google OAuth client-secret JSON (generate only).")
+    p.add_argument("--manual", action="store_true",
+                   help="No local browser (Colab/Kaggle/SSH): print a login link and "
+                        "paste the redirected URL back (generate only).")
     return p
 
 
@@ -127,7 +178,10 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv if argv is not None else sys.argv[1:])
 
     if args.command == "generate":
-        generate_token(args.client_secret, args.token_file)
+        if args.manual:
+            generate_token_manual(args.client_secret, args.token_file)
+        else:
+            generate_token(args.client_secret, args.token_file)
         return
 
     if not os.path.exists(args.token_file):

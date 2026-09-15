@@ -152,6 +152,9 @@ def register_fonts_for_libass(font_dir):
         )
 
 
+_PREPARED_FONTS: set = set()
+
+
 def prepare_typography_fonts(cfg):
     """
     Ensure all required typography fonts for the selected style are downloaded and registered.
@@ -175,6 +178,12 @@ def prepare_typography_fonts(cfg):
     style = cfg.active_font_style
     font_dir = cfg.font_dir
 
+    # Called once per clip; re-downloading checks and `fc-cache -f` cost seconds
+    # every time, so a session only prepares each font set once.
+    prepared_key = (style, os.path.abspath(font_dir))
+    if prepared_key in _PREPARED_FONTS:
+        return
+
     f_primary = font_presets[style]["main"]
     f_accent = font_presets[style]["accent"]
 
@@ -197,6 +206,7 @@ def prepare_typography_fonts(cfg):
         raise RuntimeError(f"Could not prepare the accent font: {accent_path}")
 
     register_fonts_for_libass(font_dir)
+    _PREPARED_FONTS.add(prepared_key)
     print(f"✅ All fonts prepared in: {font_dir}")
 
 

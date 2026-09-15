@@ -6,13 +6,40 @@ validates the clip timings, re-ranks clips by viral score, and prints a compact
 QA report. All metadata is English-only.
 """
 
+import bisect
 import json
+import re
 
 from .engine.prompt import MAX_CLIP_DURATION, MIN_CLIP_DURATION
 
 # Two clips sharing more than this fraction of their runtime are treated as
-# duplicate coverage of the same moment, and the weaker one is dropped.
-MAX_CLIP_OVERLAP_RATIO = 0.6
+# duplicate coverage of the same moment, and the weaker one is dropped. At 0.6,
+# two clips repeating half of each other's content were both published.
+MAX_CLIP_OVERLAP_RATIO = 0.25
+
+# Clips the AI itself scores below this are dropped, as long as a better clip remains.
+MIN_VIRAL_SCORE = 60
+
+# A clip up to this fraction under --min-duration is kept: dropping a strong
+# 28-second clip over a 30-second rule lost more than it protected.
+SHORT_CLIP_TOLERANCE = 0.9
+
+# Cut ends are moved onto the end of their sentence when the transcript has
+# punctuation: forward by up to SENTENCE_EXTEND_MAX, else back by up to
+# SENTENCE_RETREAT_MAX (never below the minimum length).
+SENTENCE_END_CHARS = (".", "?", "!", "…", "।", "॥", "؟", "。", "！", "？")
+SENTENCE_EXTEND_MAX = 2.5
+SENTENCE_RETREAT_MAX = 6.0
+
+# Cut-point snapping: keep a sliver of room before the first word so its
+# consonant is not clipped, and let the last word ring out before the cut.
+WORD_LEAD_IN = 0.12
+WORD_TAIL = 0.35
+# The AI copies line timestamps, and a line's end often equals the next word's
+# start; ignore words starting within this window when snapping an end point.
+SNAP_EPSILON = 0.05
+
+ON_SCREEN_HOOK_MAX_CHARS = 42
 
 
 # ==============================================================================
@@ -31,16 +58,22 @@ def _trim_title(text, max_len=100):
     return cut if cut else text[:max_len].strip()
 
 
-def _normalize_hashtags(text, max_tags=3):
+MAX_HASHTAGS = 15  # YouTube ignores ALL hashtags on a video that has more than 15
+MIN_HASHTAGS = 10
+
+
+def _normalize_hashtags(text, max_tags=MAX_HASHTAGS):
     parts = _normalize_spaces(text).split()
     clean = []
     seen = set()
 
     for p in parts:
-        if not p:
+        # A hashtag ends at the first space or punctuation mark, so "#Joe-Rogan"
+        # would only link "#Joe" — keep letters, digits and underscores only.
+        body = re.sub(r"[^\w]", "", p.lstrip("#"))
+        if not body or body.isdigit():
             continue
-        if not p.startswith("#"):
-            p = "#" + p.lstrip("#")
+        p = "#" + body
         key = p.lower()
         if key not in seen:
             seen.add(key)
@@ -85,6 +118,27 @@ def _build_youtube_description(hook, context, hashtags, source_url=None):
     return desc
 
 
+def _normalize_on_screen_hook(text, max_chars=ON_SCREEN_HOOK_MAX_CHARS):
+    """Clean the overlay headline: no quotes/hashtags, trimmed at a word boundary."""
+    text = _normalize_spaces(text).strip("\"'“”‘’")
+    text = " ".join(w for w in text.split() if not w.startswith("#"))
+    if len(text) <= max_chars:
+        return text
+    cut = text[:max_chars].rsplit(" ", 1)[0].rstrip(",;:-–— ")
+    return cut or text[:max_chars]
+
+
+def _merge_segments(segments):
+    """Sort keep_segments and merge overlaps, which would otherwise repeat audio."""
+    merged = []
+    for seg in sorted(segments, key=lambda s: s["start_time"]):
+        if merged and seg["start_time"] <= merged[-1]["end_time"]:
+            merged[-1]["end_time"] = max(merged[-1]["end_time"], seg["end_time"])
+        else:
+            merged.append(dict(seg))
+    return merged
+
+
 def _format_timestamp(seconds):
     try:
         seconds = float(seconds)
@@ -92,6 +146,13 @@ def _format_timestamp(seconds):
         return "?"
     minutes, secs = divmod(seconds, 60)
     return f"{int(minutes)}:{secs:04.1f}"
+
+
+def _score(item):
+    try:
+        return int(float(item.get("viral_score") or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _overlap_ratio(a, b):
@@ -133,12 +194,17 @@ def _drop_overlapping_clips(items):
 # MAIN API
 # ==============================================================================
 
-def normalize_and_validate(clips_json: list[dict]) -> list[dict]:
+def normalize_and_validate(
+    clips_json: list[dict],
+    min_duration: float = MIN_CLIP_DURATION,
+    max_duration: float = MAX_CLIP_DURATION,
+) -> list[dict]:
     """
     Normalise and enrich the AI clip list, adding the ``*_final`` fields.
 
     Mutates items in place and returns them sorted by viral score, with
-    duplicate/overlapping clips removed and timings sanity-checked.
+    duplicate/overlapping clips removed and timings sanity-checked against the
+    run's clip length bounds (``--min-duration`` / ``--max-duration``).
     """
     valid_items = []
     for item in clips_json:
@@ -167,18 +233,18 @@ def normalize_and_validate(clips_json: list[dict]) -> list[dict]:
         # over-long clips are trimmed, too-short ones cannot be salvaged.
         duration = item["end_time"] - item["start_time"]
 
-        if duration > MAX_CLIP_DURATION:
-            item["end_time"] = item["start_time"] + MAX_CLIP_DURATION
+        if duration > max_duration:
+            item["end_time"] = item["start_time"] + max_duration
             warnings.append(
-                f"trimmed from {duration:.1f}s to the {MAX_CLIP_DURATION}s limit"
+                f"trimmed from {duration:.1f}s to the {max_duration:g}s limit"
             )
-            duration = MAX_CLIP_DURATION
+            duration = max_duration
 
-        if duration < MIN_CLIP_DURATION:
+        if duration < min_duration * SHORT_CLIP_TOLERANCE:
             print(
                 f"   ⚠️ Dropped clip "
                 f"{_format_timestamp(item['start_time'])}-{_format_timestamp(item['end_time'])}"
-                f" — {duration:.1f}s is under the {MIN_CLIP_DURATION}s minimum."
+                f" — {duration:.1f}s is under the {min_duration:g}s minimum."
             )
             continue
 
@@ -217,8 +283,9 @@ def normalize_and_validate(clips_json: list[dict]) -> list[dict]:
                 if seg_end > seg_start:
                     clamped.append({"start_time": seg_start, "end_time": seg_end})
 
+            clamped = _merge_segments(clamped)
             kept = sum(s["end_time"] - s["start_time"] for s in clamped)
-            if not clamped or kept < MIN_CLIP_DURATION:
+            if not clamped or kept < min_duration * SHORT_CLIP_TOLERANCE:
                 item.pop("keep_segments", None)
                 warnings.append(
                     f"smart trim would leave {kept:.1f}s; rendering the full clip instead"
@@ -227,6 +294,7 @@ def normalize_and_validate(clips_json: list[dict]) -> list[dict]:
                 item["keep_segments"] = clamped
 
         # --- metadata normalisation --------------------------------------------
+        item["on_screen_hook"] = _normalize_on_screen_hook(item.get("on_screen_hook", ""))
         item["title"] = _trim_title(item.get("title", ""))
         item["description_hook"] = _normalize_spaces(item.get("description_hook", ""))
         item["description_context"] = _normalize_spaces(item.get("description_context", ""))
@@ -250,8 +318,10 @@ def normalize_and_validate(clips_json: list[dict]) -> list[dict]:
         # --- metadata QA --------------------------------------------------------
         if not item["title"]:
             warnings.append("title is empty")
-        if hashtag_count < 2:
-            warnings.append(f"only {hashtag_count} hashtag(s), expected 2-3")
+        if hashtag_count < MIN_HASHTAGS:
+            warnings.append(
+                f"only {hashtag_count} hashtag(s), expected {MIN_HASHTAGS}-{MAX_HASHTAGS}"
+            )
         if not item["description_hook"]:
             warnings.append("description_hook is empty")
         if not item["description_context"]:
@@ -265,8 +335,17 @@ def normalize_and_validate(clips_json: list[dict]) -> list[dict]:
         valid_items.append(item)
 
     # Strongest clips first, then drop weaker clips covering the same moment.
-    valid_items.sort(key=lambda x: x.get("viral_score", 0), reverse=True)
+    valid_items.sort(key=lambda x: _score(x), reverse=True)
     valid_items = _drop_overlapping_clips(valid_items)
+
+    strong = [item for item in valid_items if _score(item) >= MIN_VIRAL_SCORE]
+    if strong and len(strong) < len(valid_items):
+        for item in valid_items[len(strong):]:
+            print(
+                f"   ⚠️ Dropped weak clip {_format_timestamp(item['start_time'])} "
+                f"(viral_score {_score(item)} < {MIN_VIRAL_SCORE})"
+            )
+        valid_items = strong
 
     for idx, item in enumerate(valid_items):
         item["rank"] = idx + 1
@@ -275,6 +354,135 @@ def normalize_and_validate(clips_json: list[dict]) -> list[dict]:
             print(f"   ⚠️ Clip {item['rank']}: {'; '.join(item_warnings)}")
 
     return valid_items
+
+
+# ==============================================================================
+# CUT-POINT SNAPPING
+# ==============================================================================
+
+def _flatten_words(segments: list[dict]) -> list[tuple[float, float, str]]:
+    words = []
+    for seg in segments or []:
+        for w in seg.get("words", []):
+            try:
+                start, end = float(w["start"]), float(w["end"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if end > start:
+                words.append((start, end, str(w.get("word", ""))))
+    words.sort(key=lambda w: (w[0], w[1]))
+    return words
+
+
+def _ends_sentence(text) -> bool:
+    return str(text).strip().rstrip("\"'”’»)]").endswith(SENTENCE_END_CHARS)
+
+
+def _finish_sentence(end, words, starts, earliest_end):
+    """
+    Move a snapped end point onto the end of its sentence.
+
+    Gemini copies line timestamps, and a line often holds more than one
+    sentence, so clips stopped mid-sentence. Prefer finishing the sentence
+    (within SENTENCE_EXTEND_MAX); otherwise fall back to the previous sentence
+    end, but never earlier than *earliest_end*.
+    """
+    idx = bisect.bisect_right(starts, end - SNAP_EPSILON) - 1
+    if idx < 0 or _ends_sentence(words[idx][2]):
+        return end
+
+    for j in range(idx + 1, len(words)):
+        if words[j][1] - end > SENTENCE_EXTEND_MAX:
+            break
+        if _ends_sentence(words[j][2]):
+            return _snap_end(words[j][1], words, starts)
+
+    for j in range(idx - 1, -1, -1):
+        if end - words[j][1] > SENTENCE_RETREAT_MAX or words[j][1] < earliest_end:
+            break
+        if _ends_sentence(words[j][2]):
+            return _snap_end(words[j][1], words, starts)
+    return end
+
+
+def _snap_start(t, words, starts):
+    """Move a start time to the beginning of the word it falls in (or the next word)."""
+    idx = bisect.bisect_right(starts, t) - 1
+    w = idx if idx >= 0 and words[idx][1] > t else idx + 1
+    if w >= len(words):
+        return t
+    prev_end = words[w - 1][1] if w > 0 else 0.0
+    return max(words[w][0] - WORD_LEAD_IN, min(prev_end, words[w][0]), 0.0)
+
+
+def _snap_end(t, words, starts):
+    """Move an end time to the end of the word it falls in (or the previous word)."""
+    idx = bisect.bisect_right(starts, t - SNAP_EPSILON) - 1
+    if idx < 0:
+        return t
+    word_end = words[idx][1]
+    next_start = words[idx + 1][0] if idx + 1 < len(words) else float("inf")
+    return max(word_end, min(word_end + WORD_TAIL, next_start - SNAP_EPSILON))
+
+
+def _snap_span(start, end, words, starts):
+    new_start = _snap_start(float(start), words, starts)
+    new_end = _snap_end(float(end), words, starts)
+    if new_end <= new_start:
+        return float(start), float(end)
+    return round(new_start, 3), round(new_end, 3)
+
+
+def snap_clips_to_words(
+    clips: list[dict], segments: list[dict], min_duration: float = MIN_CLIP_DURATION
+) -> list[dict]:
+    """
+    Snap every cut point to the transcript's word boundaries (in place).
+
+    The AI copies line-level timestamps, so its cuts land mid-word or clip the
+    first consonant and the final syllable. This moves clip, keep-segment and
+    hook boundaries onto real word edges with a little breathing room, and
+    ends clips on a sentence end when the transcript is punctuated.
+    """
+    words = _flatten_words(segments)
+    if not words:
+        return clips
+    starts = [w[0] for w in words]
+    punctuated = any(_ends_sentence(w[2]) for w in words)
+
+    for clip in clips:
+        original_end = float(clip["end_time"])
+        clip["start_time"], clip["end_time"] = _snap_span(
+            clip["start_time"], clip["end_time"], words, starts
+        )
+        if punctuated:
+            earliest_end = clip["start_time"] + min_duration * SHORT_CLIP_TOLERANCE
+            clip["end_time"] = round(
+                _finish_sentence(clip["end_time"], words, starts, earliest_end), 3
+            )
+
+        if clip.get("hook_start_time") is not None and clip.get("hook_end_time") is not None:
+            hook_start, hook_end = _snap_span(
+                clip["hook_start_time"], clip["hook_end_time"], words, starts
+            )
+            clip["hook_start_time"] = max(hook_start, clip["start_time"])
+            clip["hook_end_time"] = min(hook_end, clip["end_time"])
+
+        segs = clip.get("keep_segments")
+        if isinstance(segs, list) and segs:
+            snapped = []
+            for seg in segs:
+                seg_start, seg_end = _snap_span(seg["start_time"], seg["end_time"], words, starts)
+                if abs(float(seg["end_time"]) - original_end) <= 1.0:
+                    # The segment that ended the clip follows the clip's new end.
+                    seg_end = clip["end_time"]
+                seg_start = max(seg_start, clip["start_time"])
+                seg_end = min(seg_end, clip["end_time"])
+                if seg_end > seg_start:
+                    snapped.append({"start_time": seg_start, "end_time": seg_end})
+            clip["keep_segments"] = _merge_segments(snapped) if snapped else segs
+
+    return clips
 
 
 def print_preview(clips: list[dict]) -> None:

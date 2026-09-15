@@ -25,15 +25,6 @@ services:
     #         - driver: nvidia
     #           count: 1
     #           capabilities: [gpu]
-
-  frontend:
-    build: ./app/web/dashboard
-    container_name: osc-frontend
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./app/web/dashboard:/app
-      - /app/node_modules
-    restart: unless-stopped
-    depends_on:
-      - backend
+#
+# The Studio frontend is static (docs/studio). Open it from GitHub Pages, or
+# serve it locally with:  python -m http.server 8080 --directory docs

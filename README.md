@@ -8,7 +8,7 @@
 
   <p align="center">
     <strong>Ultimate AI Auto-Clipper & Teaser Generator</strong><br>
-    An open-source content factory that transforms long-form videos into cinematic short-form highlights with hook teasers, karaoke subtitles, and auto-thumbnails.
+    An open-source content factory that turns long-form videos into short-form clips — AI-picked moments, speaker-aware framing, kinetic captions in any language, and scheduled uploads that learn from your channel's results.
     <br />
     <br />
     <a href="README_ID.md">🇮🇩 Baca dalam Bahasa Indonesia</a>
@@ -27,22 +27,25 @@
 |---|---|
 | **AI Transcriber** | Word-level transcription using **Faster-Whisper** (large-v3) |
 | **AI Content Curator** | **Google Gemini** analyzes context, picks the most viral moments, and generates metadata |
-| **Smart Auto-Framing** | Face-tracking via **[MediaPipe BlazeFace (Full-Range)](https://ai.google.dev/edge/mediapipe/solutions/vision/face_detector)** with Smooth Pan, Deadzone & anti-jitter algorithms |
-| **Cinematic Teaser Hook** | 3-second hook with dark overlay, cinematic bars, and **TV Glitch** transition |
-| **Karaoke Subtitles** | Word-by-word highlighted `.ASS` subtitles (Alex Hormozi / Veed style) |
-| **Kinetic Typography** | AI-driven word emphasis with bounce/stagger animations & dual-font system |
+| **Smart Auto-Framing** | Face-tracking via **[MediaPipe BlazeFace (Full-Range)](https://ai.google.dev/edge/mediapipe/solutions/vision/face_detector)** or YOLO, with deadzone smoothing and hard cuts instead of whip-pans |
+| **Follow the Speaker** | With two or more people in frame, the camera follows whoever is talking (mouth movement via MediaPipe Face Landmarker) — no HuggingFace token needed |
+| **Blurred-Background Fill** | Screen recordings, slides and other faceless footage are fitted over a blurred copy instead of being cropped |
+| **Kinetic Captions** | Heavy font, spoken word pops in gold, AI keywords larger; optional UPPERCASE; plus a headline at the top for sound-off viewers |
+| **Any Spoken Language** | Captions stay in the spoken language; non-Latin scripts (Hindi, Tamil, Arabic…) are written in English letters, never translated |
+| **Hook Teaser (optional)** | `--hook-teaser` opens with a flash-forward to the clip's peak line, then a clean cut |
 | **B-Roll Integration** | Auto-fetches contextual stock footage from **Pexels** with crossfade & Ken Burns (Supports Hybrid, Split-Screen & Camera-Switch) |
-| **Multi-Hook Intro (V2)** | Creates high-retention 3-4 micro-hook intros with flash/glitch transitions |
 | **Smart Segment Trimming** | AI dynamically selects the best segments to cut out boring/silent parts |
-| **Auto-BGM & Ducking** | Local BGM asset pool (`assets/bgm/`) with 2 modes: *sidechain ducking* (BGM auto-lowers during speech) or *background* (constant low volume). MP3 files auto-loop if shorter than the video |
-| **Auto-Thumbnail** | Frame extraction with dark overlay and large title text |
+| **Auto-BGM & Ducking** | Local BGM asset pool (`assets/bgm/`) with 2 modes: *sidechain ducking* (BGM auto-lowers during speech) or *background* (constant low volume). Audio is loudness-normalised to −14 LUFS |
+| **Video Queue** | `queue --links links.txt` clips a whole list of videos, resumes after a disconnect, and ranks every clip best-first for upload |
+| **Channel Learning** | `learn-youtube` fetches views for uploaded clips; later runs show Gemini what worked on your channel |
+| **Auto-Thumbnail** | Frame extraction with dark overlay and large title text (landscape clips — Shorts and Reels ignore custom thumbnails) |
 | **Watermark Engine** | Text & image watermarks with adjustable position (9 anchors), padding, opacity, and auto-scaling |
 | **Cross-Platform Metadata** | YouTube title/description/tags + TikTok caption — all in English |
 | **Auto YouTube Uploader** | Automatically upload highlight clips to YouTube with scheduling support and full metadata (optional) |
 | **Auto Instagram Reels Uploader** | Publish Reels to an Instagram Business/Creator account via the Instagram Graph API, with a locally-enforced publish interval (the Graph API itself has no native scheduling) (optional) |
 | **Podcast Split-Screen** | Auto speaker diarization via **Pyannote** with top-bottom split-screen layout for podcasts. Works on any vertical/square ratio (`9:16`, `1:1`, `3:4`, `4:5`). Supports **3+ speakers across multiple scenes** with per-speaker frozen frame fallback |
 | **Podcast Camera Switch** | Auto active-speaker detection with scene-aware switching — full-frame crop focuses on whoever is talking; blurred pillarbox only when speakers in the same scene talk simultaneously. Works on any vertical/square ratio (`9:16`, `1:1`, `3:4`, `4:5`) |
-| **AI Voice-Over** | Converts auto-clips into original commentary/reaction videos using **Gemini** (script generation) and **edge-tts** (free text-to-speech), complete with audio ducking, text override, and ambient edge glow |
+| **AI Voice-Over** | Converts auto-clips into original commentary/reaction videos using **Gemini** (script generation) and **edge-tts** (free text-to-speech), with a freeze-frame waveform intro |
 
 > 🎬 **NEW: Story Clip Mode (`--story-mode`)**  
 > Need to assemble a narrative from multiple specific video sources (like a brand campaign)? We've just introduced the Multi-Source Story Clip Mode!  
@@ -60,52 +63,23 @@
 
 ## ☁️ Running on Google Colab (Recommended)
 
-If you don't have a local GPU, the easiest way to run this pipeline is via **Google Colab**.
-Open a new Google Colab notebook, set the Runtime to **T4 GPU**, and create the following cells:
+If you don't have a local GPU, run the pipeline on **Google Colab**'s free T4 GPU with the ready-made notebook
+[`notebooks/Lib_AutoCutClips.ipynb`](notebooks/Lib_AutoCutClips.ipynb). It walks through:
 
-**Cell 1: Setup & Clone**
-```python
-!rm -rf ./* ./.*
-!git clone https://github.com/pdrajan0x/AutoCutClips.git .
-!pip install -r requirements.txt
+1. **Setup** — clone, install, and optionally keep `outputs/` on Google Drive so a disconnect doesn't lose progress
+2. **Secrets & cookies** — `GOOGLE_API_KEY`, and a `cookies.txt` so YouTube downloads get past the bot check
+3. **Video queue** — paste YouTube links; every video is clipped, and a re-run skips finished ones
+4. **Review** — clips ranked best-first with inline previews
+5. **Upload** — scheduled YouTube uploads with the OAuth token (cookies cannot upload)
+6. **Learn** — fetch your clips' views so later runs favour what works on your channel
+
+The same queue from a terminal:
+
+```bash
+python -m app.cli queue --links links.txt --clips 5 --cookies cookies.txt
 ```
 
-**Cell 2: Setup API Keys**
-```python
-import os
-from pathlib import Path
-from google.colab import userdata
-
-# Store your keys in Colab Secrets first!
-GOOGLE_API_KEY = userdata.get("GOOGLE_API_KEY")
-
-env_text = f"GOOGLE_API_KEY={GOOGLE_API_KEY}\n"
-Path(".env").write_text(env_text, encoding="utf-8")
-```
-
-**Cell 3: Execute (Example including Kaggle fallback for float32)**
-```python
-URL_YOUTUBE = "https://www.youtube.com/watch?v=Dc4_aBFAYWE&pp=0gcJCdkKAYcqIYzv"
-JUMLAH_CLIP = 10
-RASIO = "9:16"
-FONT_STYLE = "DEFAULT"
-GEMINI_MODEL = "gemini-3-flash-preview"
-# Use 'float32' for Kaggle CPU/T4 limitations, or 'float16' for standard Colab T4 GPUs
-WHISPER_COMPUTE_TYPE = "float32"
-
-!python -m app.cli \
-  --url "{URL_YOUTUBE}" \
-  --clips {JUMLAH_CLIP} \
-  --ratio "{RASIO}" \
-  --font-style "{FONT_STYLE}" \
-  --hook-duration 3 \
-  --words-per-sub 5 \
-  --gemini-model "{GEMINI_MODEL}" \
-  --whisper-compute-type "{WHISPER_COMPUTE_TYPE}" \
-  --no-bgm
-```
-
-*(Note: We have also included `notebooks/Lib_AutoCutClips.ipynb` in the repo as a ready-to-use template).*
+See the [Google Colab Guide](wiki/12-Google-Colab-Guide.md) for details.
 
 ---
 
@@ -243,10 +217,12 @@ python -m app.cli --url "https://drive.google.com/file/d/1234567890/view" --sour
 |---|---|---|
 | `clip` (default) | `clipping` | Auto-clip pipeline |
 | `story` | — | Same pipeline, with `--story-mode` implied |
+| `queue` | — | Clip every URL in a links file (`--links`, `--retry-failed`, `--keep-source`) |
 | `upload-youtube` | `clipping-upload-youtube` | Upload/schedule clips to YouTube |
 | `upload-instagram` | `clipping-upload-instagram` | Publish clips as Instagram Reels |
 | `reschedule-youtube` | `clipping-reschedule-youtube` | Re-space already-scheduled YouTube videos |
-| `youtube-token` | `clipping-youtube-token` | Generate/verify the YouTube OAuth token |
+| `youtube-token` | `clipping-youtube-token` | Generate/verify the YouTube OAuth token (`--manual` for Colab) |
+| `learn-youtube` | `clipping-learn-youtube` | Fetch views for uploaded clips so clip selection learns from them |
 | — | `clipping-tracker` | Run the YouTube Tracker web app |
 
 ## ⚙️ CLI Options
@@ -260,8 +236,10 @@ python -m app.cli --help
 | `--url`, `-u` | — | Video URL to process (Required unless `--story-mode`) |
 | `--source` | `youtube` | Video source platform. Choices: `youtube`, `tiktok`, `instagram`, `gdrive`. |
 | `--tiktok` | — | **[Deprecated]** Use `--source tiktok` instead |
-| `--clips`, `-n` | `7` | Number of highlight clips to generate |
+| `--cookies` | — | Netscape `cookies.txt` for yt-dlp (YouTube bot check on Colab/Kaggle); also `$YTDLP_COOKIES_FILE` |
+| `--clips`, `-n` | `7` | Maximum number of clips (fewer when a video has fewer great moments) |
 | `--ratio`, `-r` | `9:16` | Output aspect ratio (`9:16`, `16:9`, `1:1`, `3:4`, `4:5`) |
+| `--min-duration` / `--max-duration` | `30` / `80` | Clip length bounds in seconds (5-180) |
 | `--source-height` | `max` | Preferred source download max height (`max`, `1080`, `1440`, `2160`, etc.) |
 | `--ai-provider` | `gemini` | AI provider for analysis (`gemini` or `nvidia`). |
 | `--nvidia-model` | `deepseek...` | Model name for NVIDIA NIM API (e.g. `deepseek-ai/deepseek-v3`). |
@@ -272,17 +250,24 @@ python -m app.cli --help
 | `--video-crf` | `20` | libx264 CRF quality target (lower is sharper). [Range: 15-20 (Ultra Sharp), 21-25 (Standard), 26-50 (Blurry)] |
 | `--video-preset` | `auto` | Encoder preset override (NVENC: `p1`-`p7`, x264: `ultrafast`-`veryslow`). Use `auto` for default. |
 | `--video-scale-algo` | `lanczos` | Resize algorithm for render (`lanczos`: sharp, `bicubic`: balanced, `area`/`bilinear`: fast/blurry) |
-| `--words-per-sub` | `5` | Max words per karaoke subtitle group |
+| `--words-per-sub` | `3` | Max words per caption group |
+| `--hook-teaser` | `False` | Open with a flash-forward to the clip's peak line, then a clean cut |
 | `--hook-duration` | `3` | Hook teaser duration (seconds) |
-| `--font-style` | `HORMOZI` | Font preset (`DEFAULT`, `STORYTELLER`, `HORMOZI`, `CINEMATIC`) |
+| `--font-style` | `DEFAULT` | Font preset (`DEFAULT`, `STORYTELLER`, `HORMOZI`, `CINEMATIC`) |
+| `--caption-case` | `normal` | `upper` for UPPERCASE captions |
+| `--simple-captions` | — | Plain one-line karaoke captions instead of the kinetic style |
+| `--no-title-overlay` | — | Disable the AI headline at the top of the frame |
+| `--language` | `auto` | Spoken language code (`hi`, `en`, …); `auto` uses YouTube's language, then Whisper detection |
+| `--caption-script` | `latin` | `latin` writes non-Latin speech in English letters (never translated); `native` keeps the script |
 | `--no-broll` | — | Disable B-roll footage |
-| `--no-hook` | — | Disable hook glitch teaser |
-| `--hook-source` | `None` | Google Drive URL or local path for a single custom hook video (.mp4) |
+| `--hook-source` | `None` | Google Drive URL or local path for a custom hook video (.mp4), played as the teaser |
 | `--hook-source-start` | `0.0` | Start time in seconds for the custom hook video |
 | `--no-bgm` | — | Disable background music |
 | `--bgm-mode` | `ducking` | BGM mixing mode: `ducking` (sidechain compress — BGM auto-lowers during speech) or `background` (constant low volume mix) |
-| `--edge-glow` | `False` | Apply ambient edge glow to the entire output video (hook, clip, broll, voiceover). By default, glow only appears on voice-over intros. |
-| `--edge-glow-mode` | `smooth` | Edge glow rendering strategy: `default` (original 10s loop, may stutter at loop points), `smooth` (10s loop with auto-adjusted speed for seamless loop), `full` (renders full duration, heavier but zero stutter). |
+| `--bgm-dir` / `--bgm-volume` | `assets/bgm` / `0.12` | Your own music folder (mood subfolders) and its volume |
+| `--layout` | `auto` | `auto` (face crop, blurred fill for faceless clips), `crop`, or `blur` |
+| `--no-speaker-tracking` | — | Follow faces by position instead of by who is talking |
+| `--performance-file` / `--no-channel-learning` | `outputs/channel_performance.json` | Channel results from `learn-youtube` shown to the AI, or switch that off |
 | `--watermark` | `False` | Enable watermark overlay on rendered clips |
 | `--text` | `None` | Watermark text to overlay (e.g. 'Channel Name') |
 | `--image` | `None` | Path to watermark image (PNG with alpha recommended, also supports JPG, JPEG, WEBP) |
@@ -292,16 +277,9 @@ python -m app.cli --help
 | `--watermark-font-size` | `0` | Watermark font size in pixels (0 = auto ~3% frame height) |
 | `--watermark-scale` | `15` | Watermark image height as % of frame height (1-100) |
 | `--no-subs` | — | Disable all subtitle rendering |
-| `--no-karaoke` | — | Use clean text instead of karaoke highlight |
-| `--advanced-text` | `False` | Enable kinetic typography (word scaling & animation) |
-| `--advanced-text-hook` | `False` | Enable kinetic typography specifically on the hook teaser |
-| `--use-dlp-subs` | — | Use YouTube's built-in subtitles to speed up process (skips Whisper if found) |
+| `--no-karaoke` | — | No spoken-word highlight |
+| `--use-dlp-subs` | — | Use YouTube's subtitles in the spoken language (skips Whisper if found) |
 | `--face-detector` | `mediapipe` | AI model for face tracking (`mediapipe` or `yolo`) |
-| `--box-face-detection` | `False` | Draw yellow bounding boxes for tracking debug |
-| `--dev-mode` | `False` | **[Experimental]** Enable 16:9 context visualization for 9:16 tracking/stabilization process |
-| `--dev-mode-with-output` | `False` | **[Experimental]** Generates both the final production video and the dev dashboard video simultaneously. |
-| `--dev-mode-with-output-merge` | `False` | **[Experimental]** Generates a merged ultrawide side-by-side video of the final output and the dev dashboard with boxed framing (v0.9.3). |
-| `--track-lines` | `False` | Draw crosshair tracking lines extending from the face box to the boundaries |
 | `--static-crop` | `False` | Disable face tracking and use static center crop for `1:1`, `3:4`, and `4:5` formats |
 | `--yolo-size` | `8m` | YOLO face track model (`8n`, `8s`, `8m`, `8n_v2`, `9c`) |
 | `--whisper-model` | `large-v3` | Whisper model size ([see here](https://github.com/SYSTRAN/faster-whisper?tab=readme-ov-file#whisper) for options) |
@@ -325,7 +303,7 @@ python -m app.cli --help
 | `--track-deadzone` | `None` | Camera deadzone ratio where subject stays centered (default: `0.15`) |
 | `--track-smooth` | `None` | Camera catch-up speed factor (default: `0.30`) |
 | `--track-jitter` | `None` | Pixel threshold to ignore micro-shakes (default: `5`) |
-| `--track-snap` | `None` | Jump threshold to trigger hard cut between speakers (default: `0.25`) |
+| `--track-snap` | `None` | Jump threshold (fraction of frame width) for a hard cut (default: `0.08`) |
 | `--track-conf` | `0.55` | **[Experimental]** Face detection confidence threshold (raise to prevent ghosts) |
 | `--track-smooth-window` | `12` | **[Experimental]** Frame window for layout stability (12 frames ≈ 0.5s) |
 | `--scene-cut-threshold` | `18` | **[Experimental]** Sensitivity for camera-cut detection (instantly resets history) |
@@ -338,13 +316,13 @@ AutoCutClips supports **5 output aspect ratios**. All vertical/square ratios inc
 | Ratio | Output | Face Tracking | Best For |
 |---|---|---|---|
 | `9:16` | 1080×1920 | ✅ Yes | TikTok, Reels, YouTube Shorts |
-| `16:9` | 1920×1080 | ❌ No (letterbox if source differs) | YouTube, Landscape content |
+| `16:9` | 1920×1080 | ❌ No (blurred fill if the source shape differs) | YouTube, Landscape content |
 | `1:1` | 1080×1080 | ✅ Yes (can disable via `--static-crop`) | Instagram Feed, Twitter/X |
 | `3:4` | 1080×1440 | ✅ Yes (can disable via `--static-crop`) | Instagram Portrait, Pinterest |
 | `4:5` | 1080×1350 | ✅ Yes (can disable via `--static-crop`) | Instagram/Facebook Feed |
 
 > [!NOTE]
-> When using `16:9` output with a non-16:9 source (e.g., vertical video), the system applies **letterboxing** (black bars) to preserve the original proportions instead of stretching.
+> Footage that doesn't fit the frame — a vertical source in `16:9`, or a faceless screen recording in `9:16` — is fitted over a **blurred, darkened copy of itself** instead of black bars or a bad crop. Force it with `--layout blur`.
 
 ## 🎙️ Podcast Modes
 
@@ -406,17 +384,17 @@ python -m app.cli --url "VIDEO_URL" --split-screen --dynamic-split --split-trigg
 # 6. Square output (1:1) with Split-Screen
 python -m app.cli --url "VIDEO_URL" --ratio "1:1" --split-screen --dynamic-split --split-trigger face
 
-# 7. Hook V2 + Segment Trimming (default)
-python -m app.cli --url "VIDEO_URL" --hook-v2
+# 7. Aggressive silence trimming, shorter clips
+python -m app.cli --url "VIDEO_URL" --silence-trim --min-duration 15 --max-duration 45
 
-# 8. Hook V2 + Aggressive Silence Trimming
-python -m app.cli --url "VIDEO_URL" --hook-v2 --silence-trim
+# 8. Flash-forward teaser + uppercase captions
+python -m app.cli --url "VIDEO_URL" --hook-teaser --caption-case upper
 
-# 9. Hook V2 without Segment Trimming (full render)
-python -m app.cli --url "VIDEO_URL" --hook-v2 --no-segment-trim
+# 9. Hindi video: captions in English letters ("mera naam ... hai")
+python -m app.cli --url "VIDEO_URL" --language hi
 
-# 10. Hook V2 Custom: 4 micro-hooks with glitch style
-python -m app.cli --url "VIDEO_URL" --hook-v2 --hook-v2-items 4 --hook-v2-style "glitch_fast"
+# 10. A whole list of videos
+python -m app.cli queue --links links.txt --clips 5
 ```
 
 > [!IMPORTANT]
@@ -431,7 +409,7 @@ When you pass the `--voiceover` flag, the pipeline will:
 2. Synthesize the script into natural-sounding speech using **edge-tts** (free, no GPU required).
 3. **Duck** the original video's audio down to 15% volume and overlay the AI voice-over at 100% volume.
 4. **Override** the burned-in karaoke subtitles so they display the AI narrator's words instead of the original video transcript.
-5. **Visual Enhancements**: Displays a relaxed audio spectrum visualizer and a premium, slow-moving ambient edge glow around the freeze-frame intro.
+5. **Visual Intro**: A darkened freeze frame with a relaxed audio waveform while the narrator speaks.
 
 **Example Usage:**
 ```bash
@@ -449,8 +427,6 @@ python -m app.cli --url "VIDEO_URL" --voiceover --voiceover-lang id --voiceover-
 - `--voiceover-length`: Length of the script (`short` [default: 5-15s], `normal` [20-40s], `long` [40-60s]).
 - `--voiceover-volume`: Volume of narrator (default 1.0).
 - `--original-volume`: Volume of ducked video audio (default 0.15).
-- `--edge-glow`: Apply the ambient edge glow effect to the **entire** video, instead of just the voice-over intro.
-- `--edge-glow-mode`: Edge glow strategy (`default`, `smooth` [default], or `full`). `smooth` mathematically adjusts speed to remove stuttering in loops.
 
 ## 🎵 BGM (Background Music) Settings
 
@@ -465,31 +441,22 @@ python -m app.cli --url "VIDEO_URL" --voiceover --voiceover-lang id --voiceover-
 >
 > See `assets/bgm/README.md` for recommended sources to download free BGM.
 
-## 🎬 Understanding Hook V2 & Segment Trimming
+## 🎬 Segment Trimming & Hook Teaser
 
 ### Final Video Structure
 
 ```
-[Hook V2 Intro] → [MAIN CLIP] → done
-   ↑                    ↑
-   Rapid micro-hooks    This part is affected by Segment Trimming
-   (0.5-2s × 3-4)
+[Hook Teaser (optional)] → [MAIN CLIP] → done
+         ↑                      ↑
+   --hook-teaser         This part is affected by Segment Trimming
 ```
 
-**Hook V2** and **Segment Trimming** are two independent features that operate on different parts of the video.
-
-### Hook V2 (Multi-Hook Intro)
-
-Hook V2 creates a **rapid-fire intro** at the beginning of the video — 3-4 short clips (0.5-2 seconds) taken from the most punchy/controversial moments within the clip. Each piece is separated by a white flash or glitch transition. The goal: **stop the viewer from scrolling** within the first 3-5 seconds.
-
-```
-Example Hook V2:
-  [Clip 1: "NOBODY DARES" (1s)] → ⚡flash → [Clip 2: "THEY'RE ALL WRONG" (0.8s)] → ⚡flash → [Clip 3: "HERE'S THE TRUTH" (1.2s)] → [MAIN CLIP]
-```
+By default every clip opens directly on its strongest line. With `--hook-teaser`, a short flash-forward to the clip's
+peak line plays first, followed by a clean cut to the clip (it is skipped when that line already opens the clip).
 
 ### Segment Trimming
 
-Segment Trimming only applies to the **main clip** (after the hook). AI analyzes the main clip and **removes** boring sections — they're not sped up, they're **cut out entirely**, and the good parts are stitched together seamlessly.
+Segment Trimming applies to the **main clip**. AI analyzes it and **removes** boring sections — they're not sped up, they're **cut out entirely**, and the good parts are stitched together seamlessly.
 
 ```
 Example:
@@ -513,10 +480,8 @@ Example:
 | `--no-segment-trim` | No trimming, full start-to-end render | Main clip only |
 
 > [!NOTE]
-> - **Hook V2 is not affected** by any of the above flags. Hook V2 always picks its rapid-fire clips as chosen by AI.
-> - **`--no-hook` only disables Hook V1** (the 3-second glitch teaser). Hook V2 (`--hook-v2`) works independently even when `--no-hook` is active.
-> - Segment Trimming and Silence Trimming **work without Hook V2** — just omit the `--hook-v2` flag.
 > - If AI determines the entire clip is already tight and engaging, `keep_segments` will contain a single segment spanning the full duration (same effect as `--no-segment-trim`).
+> - A trim that would leave the clip shorter than `--min-duration` is ignored, and the full clip renders instead.
 
 ---
 
@@ -600,7 +565,7 @@ AutoCutClips/
     │   └── studio/           # Video render engine modules
     ├── uploaders/            # YouTube + Instagram upload & scheduling logic
     ├── tracker/              # YouTube Tracker web app
-    └── web/                  # Web API and React Dashboard
+    └── web/                  # Web API for the Studio (static pages in docs/studio)
 ```
 
 ## 📊 Results
@@ -618,11 +583,11 @@ graph LR
     C --> D[Gemini AI Analysis]
     D --> E[Metadata QA]
     E --> F[Render Loop]
-    F --> G[Face-Track Crop]
+    F --> G[Speaker-Aware Crop / Blur Fill]
     F --> H[B-Roll + BGM]
-    F --> I[ASS Subtitles]
-    F --> J[Hook + Glitch]
-    G & H & I & J --> K[Final MP4 + Thumbnail]
+    F --> I[Kinetic Captions + Headline]
+    F --> J[Optional Hook Teaser]
+    G & H & I & J --> K[Final MP4]
 ```
 
 ## 📤 Output
@@ -632,7 +597,8 @@ For each clip, the pipeline creates an `outputs/` directory and generates:
 | File | Description |
 |---|---|
 | `outputs/highlight_rank_N_ready.mp4` | Final rendered clip with subtitles, B-roll, BGM |
-| `outputs/thumbnail_rank_N.jpg` | Auto-generated thumbnail with title text |
+| `outputs/thumbnail_rank_N.jpg` | Auto-generated thumbnail with title text (landscape ratios only) |
+| `outputs/transcript_cache.json` | Saved transcript, reused when the same video is re-run |
 | `outputs/render_manifest.json` | Manifest with metadata for all clips |
 | `outputs/metadata_preview.json` | Gemini-generated metadata (titles, tags, captions) |
 
@@ -640,10 +606,10 @@ For each clip, the pipeline creates an `outputs/` directory and generates:
 
 | Style | Main Font | Emphasis Font | Best For |
 |---|---|---|---|
+| `DEFAULT` (default) | Montserrat Black | Montserrat Medium | General purpose — heaviest, most readable |
 | `HORMOZI` | Montserrat | Anton | Business / motivational |
 | `STORYTELLER` | Inter | Lora | Narrative / storytelling |
 | `CINEMATIC` | Roboto | Bebas Neue | Film / dramatic |
-| `DEFAULT` | Montserrat Black | Montserrat Medium | General purpose |
 
 ## 📺 Auto-Upload to YouTube
 
@@ -660,6 +626,9 @@ The project includes a standalone YouTube auto-uploader with scheduling support!
    ```
 3. To run a test with only the first video, use `python -m app.cli upload-youtube --test-mode`. Run `python -m app.cli upload-youtube --help` to see all scheduling, safety-config, and timezone options.
 4. To re-space videos that are still scheduled/private, use `python -m app.cli reschedule-youtube [--apply]` (dry-run by default).
+5. Once uploads have been public for a couple of days, run `python -m app.cli learn-youtube`. It saves each clip's views to `outputs/channel_performance.json`, and later clip runs show Gemini the channel's best and weakest clips (from 6 public clips upward).
+
+Uploads carry the clip's hashtags in the description and tags, and set `defaultAudioLanguage` to the detected spoken language. Clips already uploaded are skipped on the next run.
 
 ## 📘 Auto-Upload to Instagram (Reels)
 

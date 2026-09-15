@@ -11,7 +11,7 @@
 
 * [[Face Tracking & Auto-Framing|Face-Tracking-and-Auto-Framing]]
 * [[Podcast Modes|Podcast-Modes]]
-* [[Hook V2 & Segment Trimming|Hook-V2-and-Segment-Trimming]]
+* [[Segment Trimming & Hook Teaser|Segment-Trimming-and-Hook-Teaser]]
 * [[Subtitles & Typography|Subtitles-and-Typography]]
 * [[BGM & Audio|BGM-and-Audio]]
 * [[Video Quality & Rendering|Video-Quality-and-Rendering]]

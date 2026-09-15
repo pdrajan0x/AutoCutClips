@@ -7,7 +7,8 @@ corresponding step actually runs.
 """
 
 from .analysis import analyze_with_ai, analyze_with_gemini, analyze_with_nvidia
-from .download import download_video
+from .download import download_video, source_info_path
+from .romanize import romanize_clip_captions
 from .transcribe import parse_youtube_json3_subs, transcribe_video
 
 __all__ = [
@@ -15,6 +16,8 @@ __all__ = [
     "analyze_with_gemini",
     "analyze_with_nvidia",
     "download_video",
+    "romanize_clip_captions",
+    "source_info_path",
     "parse_youtube_json3_subs",
     "transcribe_video",
 ]

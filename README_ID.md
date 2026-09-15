@@ -28,21 +28,24 @@
 | **AI Transcriber** | Transkripsi per-kata dengan akurasi tinggi menggunakan **Faster-Whisper** (large-v3) |
 | **AI Content Curator** | **Google Gemini** menganalisis konteks, memilih momen paling viral, dan membuat metadata |
 | **Smart Auto-Framing** | Pelacakan wajah via **[MediaPipe BlazeFace (Full-Range)](https://ai.google.dev/edge/mediapipe/solutions/vision/face_detector)** dengan algoritma Smooth Pan, Deadzone & anti-jitter |
-| **Cinematic Teaser Hook** | Hook 3 detik dengan overlay gelap, cinematic bars, dan transisi **TV Glitch** |
-| **Karaoke Subtitles** | Subtitle `.ASS` yang menyala per-kata (gaya Alex Hormozi / Veed) |
-| **Kinetic Typography** | Penekanan kata otomatis dengan animasi bounce/stagger & sistem dual-font |
+| **Ikuti Pembicara** | Saat ada 2+ orang di frame, kamera mengikuti siapa yang sedang bicara (gerakan mulut via MediaPipe Face Landmarker) — tanpa token HuggingFace |
+| **Latar Blur** | Rekaman layar, slide, dan footage tanpa wajah ditaruh utuh di atas salinan blur, bukan di-crop |
+| **Kinetic Captions** | Font tebal, kata yang diucapkan membesar dan berwarna emas, kata kunci AI lebih besar; opsi HURUF KAPITAL; plus judul di atas untuk penonton tanpa suara |
+| **Semua Bahasa** | Caption tetap dalam bahasa yang diucapkan; aksara non-Latin (Hindi, Tamil, Arab…) ditulis dengan huruf Latin, tidak diterjemahkan |
+| **Hook Teaser (opsional)** | `--hook-teaser` membuka klip dengan cuplikan kalimat puncak, lalu potong bersih ke klip |
 | **B-Roll Integration** | Mengambil stock footage kontekstual dari **Pexels** dengan crossfade & Ken Burns (Mendukung Hybrid, Split-Screen & Camera-Switch) |
-| **Multi-Hook Intro (V2)** | Membuat intro dengan 3-4 potongan hook cepat yang disertai transisi white flash/glitch |
+| **Video Queue** | `queue --links links.txt` memproses daftar video, bisa dilanjutkan setelah terputus |
+| **Belajar dari Channel** | `learn-youtube` mengambil jumlah view klip yang sudah diupload; run berikutnya menunjukkan ke Gemini apa yang berhasil |
 | **Smart Segment Trimming** | AI dinamis memotong bagian kosong/membosankan di tengah video untuk pacing cepat |
 | **Auto-BGM & Ducking** | Musik latar otomatis dari koleksi lokal (`assets/bgm/`) dengan 2 mode: *sidechain ducking* (volume BGM otomatis turun saat bicara) atau *background* (volume konstan). File MP3 di-loop otomatis jika lebih pendek dari video |
-| **Auto-Thumbnail** | Ekstraksi frame dengan overlay gelap dan teks judul besar |
+| **Auto-Thumbnail** | Ekstraksi frame dengan overlay gelap dan teks judul besar (rasio landscape — Shorts dan Reels mengabaikan thumbnail kustom) |
 | **Watermark Engine** | Watermark teks & gambar kustom dengan posisi yang dapat diatur (9 posisi), padding, opacity, dan ukuran dinamis |
 | **Metadata Lintas Platform** | Judul/deskripsi/tag YouTube + caption TikTok — semua dalam Bahasa Inggris |
 | **Auto YouTube Uploader** | Upload klip highlight beserta metadata ke YouTube secara otomatis dengan penjadwalan (opsional) |
 | **Auto Instagram Reels Uploader** | Publish Reels ke akun Instagram Business/Creator via Instagram Graph API, dengan interval publish yang diatur secara lokal (Graph API sendiri tidak punya native scheduling) (opsional) |
 | **Podcast Split-Screen** | Diarization speaker otomatis via **Pyannote** dengan layout split-screen atas-bawah untuk podcast. Bekerja di semua rasio vertikal/kotak (`9:16`, `1:1`, `3:4`, `4:5`). Mendukung **3+ speaker lintas scene** dengan frozen frame fallback per-speaker |
 | **Podcast Camera Switch** | Deteksi speaker aktif otomatis dengan switching yang scene-aware — crop full-frame fokus ke pembicara aktif; blurred pillarbox hanya saat speaker di scene yang sama bicara bersamaan. Bekerja di semua rasio vertikal/kotak (`9:16`, `1:1`, `3:4`, `4:5`) |
-| **AI Voice-Over** | Mengubah auto-clip menjadi video reaksi/komentar original menggunakan **Gemini** (pembuat script) dan **edge-tts** (text-to-speech gratis), lengkap dengan audio ducking, penimpaan teks subtitle, dan ambient edge glow |
+| **AI Voice-Over** | Mengubah auto-clip menjadi video reaksi/komentar original menggunakan **Gemini** (pembuat script) dan **edge-tts** (text-to-speech gratis), lengkap dengan audio ducking, penimpaan teks subtitle, dan intro freeze-frame dengan waveform |
 
 > 🎬 **BARU: Mode Story Clip (`--story-mode`)**  
 > Perlu merakit cerita dari potongan adegan spesifik di berbagai sumber video (misalnya untuk *campaign* brand)? Gunakan fitur Story Clip multi-sumber!  
@@ -272,17 +275,25 @@ python -m app.cli --help
 | `--video-crf` | `20` | Target kualitas CRF untuk libx264 (lebih kecil = lebih tajam). [Range: 15-20 (Sangat Tajam), 21-25 (Standar), 26-50 (Buram)] |
 | `--video-preset` | `auto` | Override preset encoder (NVENC: `p1`-`p7`, x264: `ultrafast`-`veryslow`). Gunakan `auto` untuk default. |
 | `--video-scale-algo` | `lanczos` | Algoritma resize render (`lanczos`: tajam, `bicubic`: seimbang, `area`/`bilinear`: cepat/buram) |
-| `--words-per-sub` | `5` | Maks kata per grup subtitle karaoke |
+| `--words-per-sub` | `3` | Maks kata per grup caption |
+| `--min-duration` / `--max-duration` | `30` / `80` | Batas durasi klip dalam detik (5-180) |
+| `--cookies` | — | `cookies.txt` (format Netscape) untuk yt-dlp, mengatasi cek bot YouTube di Colab/Kaggle |
+| `--hook-teaser` | `False` | Buka klip dengan cuplikan kalimat puncak, lalu potong bersih ke klip |
 | `--hook-duration` | `3` | Durasi hook teaser (detik) |
-| `--font-style` | `HORMOZI` | Preset font (`DEFAULT`, `STORYTELLER`, `HORMOZI`, `CINEMATIC`) |
+| `--font-style` | `DEFAULT` | Preset font (`DEFAULT`, `STORYTELLER`, `HORMOZI`, `CINEMATIC`) |
+| `--caption-case` | `normal` | `upper` untuk caption HURUF KAPITAL |
+| `--simple-captions` | — | Caption satu baris sederhana, bukan gaya kinetik |
+| `--no-title-overlay` | — | Matikan judul AI di bagian atas frame |
+| `--language` | `auto` | Kode bahasa yang diucapkan (`id`, `hi`, `en`, …) |
+| `--caption-script` | `latin` | `latin` menulis aksara non-Latin dengan huruf Latin (tidak diterjemahkan); `native` mempertahankan aksara asli |
+| `--layout` | `auto` | `auto` (crop wajah, latar blur untuk klip tanpa wajah), `crop`, atau `blur` |
+| `--no-speaker-tracking` | — | Ikuti wajah berdasarkan posisi, bukan siapa yang bicara |
 | `--no-broll` | — | Nonaktifkan footage B-roll |
-| `--no-hook` | — | Nonaktifkan hook glitch teaser |
 | `--hook-source` | `None` | URL Google Drive atau path lokal untuk file video custom hook tunggal (.mp4) |
 | `--hook-source-start` | `0.0` | Waktu mulai (detik) di dalam video custom hook |
 | `--no-bgm` | — | Nonaktifkan musik latar |
 | `--bgm-mode` | `ducking` | Mode mixing BGM: `ducking` (sidechain compress — volume BGM otomatis turun saat bicara) atau `background` (volume konstan rendah) |
-| `--edge-glow` | `False` | Terapkan efek ambient edge glow ke seluruh output video (hook, klip, broll, voiceover). Secara default, glow hanya muncul pada intro voice-over. |
-| `--edge-glow-mode` | `smooth` | Strategi render edge glow: `default` (original 10s loop, bisa patah di titik loop), `smooth` (10s loop dengan auto-adjusted speed agar seamless), `full` (render full durasi tanpa loop, lebih berat tapi anti-patah). |
+| `--bgm-dir` / `--bgm-volume` | `assets/bgm` / `0.12` | Folder musik sendiri (dengan subfolder mood) dan volumenya |
 | `--watermark` | `False` | Aktifkan watermark pada klip hasil render |
 | `--text` | `None` | Teks watermark (contoh: 'Nama Channel') |
 | `--image` | `None` | Path ke file gambar watermark (PNG dengan alpha direkomendasikan, juga mendukung JPG, JPEG, WEBP) |
@@ -292,16 +303,9 @@ python -m app.cli --help
 | `--watermark-font-size` | `0` | Ukuran font teks watermark (0 = otomatis ~3% tinggi frame) |
 | `--watermark-scale` | `15` | Tinggi gambar watermark dalam % tinggi frame (1-100) |
 | `--no-subs` | — | Nonaktifkan semua rendering subtitle |
-| `--no-karaoke` | — | Gunakan teks biasa tanpa highlight karaoke |
-| `--advanced-text` | `False` | Aktifkan typografi kinetik (skala kata & animasi pop) |
-| `--advanced-text-hook` | `False` | Aktifkan typografi kinetik khusus untuk hook teaser |
-| `--use-dlp-subs` | — | Unduh dan gunakan subtitle bawaan YouTube untuk mempercepat proses (melewati Whisper) |
+| `--no-karaoke` | — | Tanpa highlight kata yang sedang diucapkan |
+| `--use-dlp-subs` | — | Gunakan subtitle YouTube dalam bahasa yang diucapkan (melewati Whisper jika tersedia) |
 | `--face-detector` | `mediapipe` | Model AI untuk crop wajah (`mediapipe` atau `yolo`) |
-| `--box-face-detection` | `False` | Tampilkan kotak kuning deteksi wajah (debug) |
-| `--dev-mode` | `False` | **[Eksperimental]** Aktifkan visualisasi konteks 16:9 untuk proses tracking/stabilisasi 9:16 |
-| `--dev-mode-with-output` | `False` | **[Eksperimental]** Menghasilkan video final dan video "Director's Console" secara bersamaan di file terpisah. |
-| `--dev-mode-with-output-merge` | `False` | **[Eksperimental]** Menghasilkan satu video side-by-side (2648x1220) dengan bingkai kotak (boxed) dan legend (v0.9.3). |
-| `--track-lines` | `False` | Tampilkan garis crosshair kuning dari kotak wajah ke batas window tracking |
 | `--static-crop` | `False` | Nonaktifkan pelacakan wajah dan gunakan static center crop untuk format `1:1`, `3:4`, dan `4:5` |
 | `--yolo-size` | `8m` | Parameter model YOLO ADetailer (`8n`, `8s`, `8m`, `8n_v2`, `9c`) |
 | `--whisper-model` | `large-v3` | Ukuran model Whisper ([lihat daftar model](https://github.com/SYSTRAN/faster-whisper?tab=readme-ov-file#whisper)) |
@@ -404,17 +408,17 @@ python -m app.cli --url "URL_VIDEO" --split-screen --dynamic-split --split-trigg
 # 6. Output kotak (1:1) dengan Split-Screen
 python -m app.cli --url "URL_VIDEO" --ratio "1:1" --split-screen --dynamic-split --split-trigger face
 
-# 7. Hook V2 + Segment Trimming (default)
-python -m app.cli --url "URL_VIDEO" --hook-v2
+# 7. Silence trimming agresif, klip lebih pendek
+python -m app.cli --url "URL_VIDEO" --silence-trim --min-duration 15 --max-duration 45
 
-# 8. Hook V2 + Silence Trimming Agresif
-python -m app.cli --url "URL_VIDEO" --hook-v2 --silence-trim
+# 8. Hook teaser + caption huruf kapital
+python -m app.cli --url "URL_VIDEO" --hook-teaser --caption-case upper
 
-# 9. Hook V2 tanpa Segment Trimming (render penuh)
-python -m app.cli --url "URL_VIDEO" --hook-v2 --no-segment-trim
+# 9. Daftar banyak video sekaligus
+python -m app.cli queue --links links.txt --clips 5
 
-# 10. Hook V2 Custom: 4 micro-hooks dengan gaya glitch
-python -m app.cli --url "URL_VIDEO" --hook-v2 --hook-v2-items 4 --hook-v2-style "glitch_fast"
+# 10. Ambil jumlah view klip yang sudah diupload (belajar dari channel)
+python -m app.cli learn-youtube
 ```
 
 > [!IMPORTANT]
@@ -429,7 +433,7 @@ Ketika Anda menggunakan argumen `--voiceover`, sistem akan:
 2. Mengubah script menjadi suara natural menggunakan **edge-tts** (gratis, tanpa butuh GPU).
 3. **Mengecilkan (ducking)** suara video asli ke volume 15% dan menimpa dengan suara AI Voice-Over di volume 100%.
 4. **Menimpa** teks subtitle karaoke di layar sehingga menampilkan kata-kata dari narator AI, bukan dari transkrip video asli.
-5. **Peningkatan Visual**: Menampilkan visualizer spektrum audio yang tenang dan ambient edge glow yang elegan bergerak perlahan mengitari intro freeze-frame.
+5. **Intro Visual**: Freeze frame yang digelapkan dengan waveform audio yang tenang selama narator berbicara.
 
 **Contoh Penggunaan:**
 ```bash
@@ -447,34 +451,23 @@ python -m app.cli --url "URL_VIDEO" --voiceover --voiceover-lang id --voiceover-
 - `--voiceover-length`: Panjang naskah (`short` [default: 5-15 dtk], `normal` [20-40 dtk], `long` [40-60 dtk]).
 - `--voiceover-volume`: Volume suara narator (default 1.0).
 - `--original-volume`: Volume suara video asli saat narator bicara (default 0.15).
-- `--edge-glow`: Terapkan efek ambient edge glow ke **seluruh** video, tidak hanya di intro voice-over.
-- `--edge-glow-mode`: Strategi edge glow (`default`, `smooth` [default], atau `full`). Pilihan `smooth` secara matematis menyesuaikan kecepatan putaran warna agar loop tidak terlihat patah.
 
-## 🎬 Penjelasan Hook V2 & Segment Trimming
+## 🎬 Segment Trimming & Hook Teaser
 
 ### Struktur Video Final
 
 ```
-[Hook V2 Intro] → [CLIP UTAMA] → selesai
-   ↑                    ↑
-   Multi-hook cepat     Bagian ini yang dipengaruhi Segment Trimming
-   (0.5-2 dtk × 3-4)
+[Hook Teaser (opsional)] → [CLIP UTAMA] → selesai
+         ↑                       ↑
+   --hook-teaser          Bagian ini yang dipengaruhi Segment Trimming
 ```
 
-**Hook V2** dan **Segment Trimming** adalah dua fitur independen yang bekerja di bagian berbeda dari video.
-
-### Hook V2 (Multi-Hook Intro)
-
-Hook V2 membuat **intro cepat** di awal video berupa 3-4 potongan pendek (0.5-2 detik) yang diambil dari momen paling mencolok/kontroversial di dalam klip. Setiap potongan dipisahkan oleh transisi white flash atau glitch. Tujuannya: **menahan penonton agar tidak scroll** dalam 3-5 detik pertama.
-
-```
-Contoh Hook V2:
-  [Potongan 1: "GAK ADA YANG BERANI" (1 dtk)] → ⚡flash → [Potongan 2: "SEMUA SALAH" (0.8 dtk)] → ⚡flash → [Potongan 3: "INI FAKTANYA" (1.2 dtk)] → [CLIP UTAMA]
-```
+Secara default setiap klip langsung dibuka dengan kalimat terkuatnya. Dengan `--hook-teaser`, cuplikan singkat kalimat
+puncak klip diputar lebih dulu, lalu potong bersih ke awal klip (dilewati jika kalimat itu memang pembuka klip).
 
 ### Segment Trimming (Pemangkasan Segmen)
 
-Segment Trimming hanya berlaku di **clip utama** (setelah hook). AI menganalisis clip utama dan **membuang/memotong** bagian yang tidak menarik — bukan dipercepat, tapi **dipotong habis** lalu potongan bagus disambung langsung.
+Segment Trimming berlaku di **clip utama**. AI menganalisis clip utama dan **membuang/memotong** bagian yang tidak menarik — bukan dipercepat, tapi **dipotong habis** lalu potongan bagus disambung langsung.
 
 ```
 Contoh:
@@ -498,9 +491,7 @@ Contoh:
 | `--no-segment-trim` | Tidak ada trim, render penuh start-to-end | Clip utama saja |
 
 > [!NOTE]
-> - **Hook V2 tidak terpengaruh** oleh ketiga opsi di atas. Hook V2 selalu mengambil potongan cepat sesuai yang AI pilih.
-> - **`--no-hook` hanya mematikan Hook V1** (teaser glitch 3 detik). Hook V2 (`--hook-v2`) tetap berjalan meskipun `--no-hook` aktif. Kedua hook bersifat independen.
-> - Segment Trimming dan Silence Trimming **bisa digunakan tanpa Hook V2**, cukup jangan tambahkan flag `--hook-v2`.
+> - Trim yang membuat klip lebih pendek dari `--min-duration` diabaikan, dan klip dirender penuh.
 > - Jika AI menilai seluruh clip sudah padat dan menarik, `keep_segments` hanya berisi 1 segmen yang mencakup seluruh durasi (efeknya sama seperti `--no-segment-trim`).
 
 ---
@@ -528,7 +519,7 @@ AutoCutClips/
     │   └── studio/           # Modul mesin render video
     ├── uploaders/            # Logika upload & penjadwalan YouTube + Instagram
     ├── tracker/              # Aplikasi web YouTube Tracker
-    └── web/                  # Web API dan React Dashboard
+    └── web/                  # Web API untuk Studio (halaman statis di docs/studio)
 ```
 
 ## 📊 Hasil (Results)
@@ -546,11 +537,11 @@ graph LR
     C --> D[Analisis Gemini AI]
     D --> E[QA Metadata]
     E --> F[Loop Render]
-    F --> G[Crop Face-Track]
+    F --> G[Crop Ikuti Pembicara / Latar Blur]
     F --> H[B-Roll + BGM]
-    F --> I[Subtitle ASS]
-    F --> J[Hook + Glitch]
-    G & H & I & J --> K[MP4 Final + Thumbnail]
+    F --> I[Kinetic Captions + Judul]
+    F --> J[Hook Teaser Opsional]
+    G & H & I & J --> K[MP4 Final]
 ```
 
 ## 📤 Output
@@ -560,7 +551,7 @@ Untuk setiap klip, pipeline akan membuat folder `outputs/` dan menghasilkan:
 | File | Deskripsi |
 |---|---|
 | `outputs/highlight_rank_N_ready.mp4` | Klip final dengan subtitle, B-roll, BGM |
-| `outputs/thumbnail_rank_N.jpg` | Thumbnail otomatis dengan teks judul |
+| `outputs/thumbnail_rank_N.jpg` | Thumbnail otomatis dengan teks judul (hanya rasio landscape) |
 | `outputs/render_manifest.json` | Manifest berisi metadata semua klip |
 | `outputs/metadata_preview.json` | Metadata dari Gemini (judul, tag, caption) |
 
@@ -568,10 +559,10 @@ Untuk setiap klip, pipeline akan membuat folder `outputs/` dan menghasilkan:
 
 | Gaya | Font Utama | Font Penekanan | Cocok Untuk |
 |---|---|---|---|
+| `DEFAULT` (default) | Montserrat Black | Montserrat Medium | Serbaguna — paling tebal dan mudah dibaca |
 | `HORMOZI` | Montserrat | Anton | Bisnis / motivasi |
 | `STORYTELLER` | Inter | Lora | Narasi / storytelling |
 | `CINEMATIC` | Roboto | Bebas Neue | Film / dramatis |
-| `DEFAULT` | Montserrat Black | Montserrat Medium | Serbaguna |
 
 ## 🎛️ Penjelasan Parameter Konfigurasi
 
@@ -587,10 +578,10 @@ Untuk setiap klip, pipeline akan membuat folder `outputs/` dan menghasilkan:
 - `--video-scale-algo` : Algoritma scaling render. Gunakan `lanczos` untuk hasil paling tajam.
 
 **🎬 Pengaturan Konten & Hook**
-- `--words-per-sub` : Jumlah maksimal kata yang muncul di layar (karaoke style)
+- `--words-per-sub` : Jumlah maksimal kata yang muncul di layar (default `3`)
+- `--hook-teaser` : Aktifkan cuplikan kalimat puncak di awal klip
 - `--hook-duration` : Durasi teaser di awal video (detik)
 - `--no-broll` : Matikan fitur B-roll (stock footage otomatis)
-- `--no-hook` : Matikan hook glitch di awal klip
 
 **🎵 Pengaturan BGM (Background Music)**
 - `--no-bgm` : Matikan fitur BGM sepenuhnya (tanpa musik latar)
@@ -607,9 +598,10 @@ Untuk setiap klip, pipeline akan membuat folder `outputs/` dan menghasilkan:
 **🎨 Pengaturan Subtitle (ASS)**
 - `--font-style` : Pilih gaya font untuk subtitle
 - `--no-subs` : Matikan semua rendering subtitle (video bersih tanpa teks)
-- `--no-karaoke` : Matikan efek warna kuning per-kata, ganti dengan teks bersih muncul satu per satu
-- `--advanced-text` : Aktifkan efek scaling kata besar-kecil (kinetic typography)
-- `--advanced-text-hook` : Aktifkan efek scaling kata khusus untuk teaser hook di awal video
+- `--no-karaoke` : Matikan highlight emas pada kata yang sedang diucapkan
+- `--caption-case upper` : Caption HURUF KAPITAL
+- `--simple-captions` : Caption satu baris sederhana, bukan gaya kinetik (default)
+- `--no-title-overlay` : Matikan judul AI di bagian atas frame
 
 **⚙️ Pengaturan Engine Pendukung**
 - `--use-dlp-subs` : Aktifkan pengunduhan subtitle bawaan YouTube (jika tersedia) untuk bypass proses AI Whisper (sangat menghemat waktu komputasi).
@@ -635,15 +627,13 @@ Untuk setiap klip, pipeline akan membuat folder `outputs/` dan menghasilkan:
 - `--track-deadzone` : Rasio area "aman" di tengah di mana kamera tidak akan bergerak (default: `0.15`).
 - `--track-smooth` : Faktor kecepatan kamera mengejar wajah (default: `0.30`). Makin besar makin cepat menyusul.
 - `--track-jitter` : Ambang batas pixel untuk mengabaikan getaran kecil (default: `5`).
-- `--track-snap` : Ambang batas lompatan wajah untuk memicu hard cut antar pembicara (default: `0.25`).
+- `--track-snap` : Ambang batas lompatan wajah (fraksi lebar frame) untuk memicu hard cut (default: `0.08`).
 - `--track-conf` : Ambang batas keyakinan (*confidence*) deteksi wajah (default: `0.55`). Naikkan jika banyak "deteksi hantu", turunkan jika wajah sering hilang.
 - `--track-smooth-window` : Jumlah frame untuk stabilisasi layout (default: `12`). (12 frame ≈ 0.5 dtk, 24 frame ≈ 1 dtk pada 24fps). Makin besar makin stabil.
 - `--scene-cut-threshold` : Sensitivitas deteksi perpindahan kamera (default: `18`). Mereset history layout secara instan saat kamera pindah. **[Range: 15-20 (Gelap/Studio), 30-45 (Terang)]**
 - `--track-iou-threshold` : Ambang batas penggabungan kotak wajah (default: `0.2`). Semakin rendah semakin agresif dalam menggabungkan kotak deteksi yang nempel. **[Range: 0.1-0.5]**
-- `--track-lines` : Tampilkan garis crosshair kuning untuk kalibrasi visual window 9:16.
-- `--dev-mode` : **[Eksperimental]** Aktifkan mode visualisasi "Director" untuk rasio 9:16. Sangat berguna untuk kalibrasi responsivitas AI tracking.
-- `--dev-mode-with-output` : Menghasilkan **dua** file `mp4` secara bersamaan: video 9:16 standar dan video 1920x1080 "Director's Console" (menghemat waktu proses AI).
-- `--dev-mode-with-output-merge` : Menghasilkan output **side-by-side** (2648x1220) yang menggabungkan video akhir dan "Director's Console" dalam satu layar selebar ultrawide. Sangat cocok untuk verifikasi real-time!
+- `--layout` : `auto` (crop wajah, latar blur untuk klip tanpa wajah), `crop`, atau `blur`.
+- `--no-speaker-tracking` : Saat ada beberapa orang di frame, ikuti wajah berdasarkan posisi, bukan siapa yang bicara.
 
 > 💡 **Skenario rendering Camera Switch:**
 > - **Satu speaker aktif** → crop full 9:16 mengikuti wajah speaker tersebut
@@ -652,7 +642,7 @@ Untuk setiap klip, pipeline akan membuat folder `outputs/` dan menghasilkan:
 > - **Tidak ada yang bicara** → tetap pada speaker terakhir yang aktif
 
 **🌐 Asset Eksternal**
-- Semua asset pendukung (Model AI, Glitch video, Font) akan diunduh **otomatis** saat pertama kali dijalankan
+- Semua asset pendukung (Model AI, Font) akan diunduh **otomatis** saat pertama kali dijalankan
 
 ## 🐍 Rekomendasi Konfigurasi (Notebook/Colab)
 

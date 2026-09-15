@@ -7,7 +7,7 @@ import numpy as np
 import mediapipe as mp
 
 from ..progress import ProgressBar
-from .broll import crop_center_broll
+from .broll import crop_center_broll, open_broll_captures, read_broll_frame
 from .face_detection import get_face_detector
 from .utils import format_seconds, _resize_frame, _get_render_dims
 from .ffmpeg_utils import detect_video_encoder, open_ffmpeg_video_writer
@@ -66,16 +66,7 @@ def render_split_screen_video(
     if broll_data is None:
         broll_data = []
 
-    broll_caps = []
-    for br in broll_data:
-        if "filepath" in br and os.path.exists(br["filepath"]):
-            broll_caps.append(
-                {
-                    "start": br["start_time"],
-                    "end": br["end_time"],
-                    "cap": cv2.VideoCapture(br["filepath"]),
-                }
-            )
+    broll_caps = open_broll_captures(broll_data)
 
     # Setup face detector
     yolo_model = None
@@ -104,21 +95,8 @@ def render_split_screen_video(
     # Output dimensions calculated dynamically
     out_w, out_h = _get_render_dims(cfg, ratio, source_h=height)
     out_w_final, out_h_final = out_w, out_h
-    
-    dev_visualize = cfg.dev_mode or cfg.dev_mode_with_output or cfg.dev_mode_with_output_merge
-    dual_output = cfg.dev_mode_with_output
-    merge_output = cfg.dev_mode_with_output_merge
-    
-    if merge_output:
-        # Merged Full Padded Canvas: 2648 x 1220
-        out_w_final, out_h_final = 2648, 1220
-    elif dev_visualize and not dual_output:
-        # Pure Dev Mode (override output)
-        out_w_final, out_h_final = 1920, 1080
-    
-    # Calculate panel dimensions based on the 1080x1920 orientation
-    # regardless of whether dev mode is on, because the internal layout arithmetic
-    # must still think in terms of the target 9:16 portrait canvas.
+
+    # Panel layout arithmetic works on the target portrait canvas.
     panel_h = (out_h - DIVIDER_HEIGHT) // 2
     panel_w = out_w
 
@@ -637,19 +615,7 @@ def render_split_screen_video(
         return []
 
     # ---- PHASE 3: RENDER FRAMES ----
-    # Determine outputs needed
-    writer_main = None
-    writer_dev = None
-    
-    if dual_output:
-        # Two separate files need to be written simultaneously
-        vid_main = output_video
-        vid_dev = output_video.replace(".ts", "_dev.ts").replace(".mp4", "_dev.mp4")
-        writer_main = open_ffmpeg_video_writer(vid_main, 1080, 1920, orig_fps, video_encoder)
-        writer_dev = open_ffmpeg_video_writer(vid_dev, 1920, 1080, orig_fps, video_encoder)
-    else:
-        # Only one stream (either standard, pure dev, or merged)
-        writer_main = open_ffmpeg_video_writer(output_video, out_w_final, out_h_final, orig_fps, video_encoder)
+    writer_main = open_ffmpeg_video_writer(output_video, out_w_final, out_h_final, orig_fps, video_encoder)
 
     # Pre-create overlay for inactive speaker
     dark_overlay = np.zeros((panel_h, panel_w, 3), dtype=np.uint8)
@@ -701,8 +667,7 @@ def render_split_screen_video(
     # Stability window for layout decisions (Majority Vote of face counts)
     LAYOUT_SMOOTH_WINDOW = getattr(cfg, "track_smooth_window", 12)
     face_count_history = []
-    # Only assigned by the dynamic face-trigger path, but the dev-mode HUD reads
-    # it on every frame — seed it so --dev-mode works without --dynamic-split.
+    # Only assigned by the dynamic face-trigger path.
     stable_count = 0
     # (MIN_HOLD is already initialized above)
     is_dynamic = getattr(cfg, "use_dynamic_split", False)
@@ -727,17 +692,6 @@ def render_split_screen_video(
             t = frame_count / orig_fps
             if t > duration:
                 break
-
-            if cfg.box_face_detection:
-                boxes = _get_all_boxes(t)
-                for b in boxes:
-                    cv2.rectangle(
-                        frame,
-                        (int(b[0]), int(b[1])),
-                        (int(b[2]), int(b[3])),
-                        (0, 255, 255),
-                        3,
-                    )
 
             # --- Scene Cut Detection ---
             # Lightweight check: if pixels change drastically, clear stability history to allow instant switch
@@ -949,10 +903,9 @@ def render_split_screen_video(
             for bc in broll_caps:
                 if bc["start"] <= absolute_time <= bc["end"]:
                     elapsed_broll = absolute_time - bc["start"]
-                    bc["cap"].set(cv2.CAP_PROP_POS_MSEC, elapsed_broll * 1000)
-                    ret_b, frame_b = bc["cap"].read()
+                    frame_b = read_broll_frame(bc, elapsed_broll)
 
-                    if ret_b:
+                    if frame_b is not None:
                         total_broll_duration = bc["end"] - bc["start"]
                         progress_broll = elapsed_broll / total_broll_duration if total_broll_duration > 0 else 0
                         zoom_factor = 1.0 + ((MAX_ZOOM - 1.0) * progress_broll)
@@ -977,132 +930,7 @@ def render_split_screen_video(
             if getattr(cfg, "watermark_enabled", False):
                 final_frame = apply_watermark(final_frame, cfg)
 
-            if dev_visualize:
-                # --- DIRECTOR'S CONSOLE (DEV MODE) ---
-                # UI Constants
-                HUD_COLOR = (0, 255, 0)
-                HUD_X, HUD_Y = 30, 50
-                
-                # Base frame: 1920x1080 landscape
-                frame_res = _resize_frame(frame, (1920, 1080))
-                frame_dev = (frame_res * 0.35).astype(np.uint8) # Dim background
-                
-                scale_x = 1920 / width
-                scale_y = 1080 / height
-                
-                # PREcalculate coordinates for BOTH layouts
-                # 1. solo (9:16)
-                spk_solo = current_speaker or (speaker_top if speaker_top in ranked else ranked[0])
-                cx_solo, cy_solo, _ = _get_pos_full(spk_solo, t)
-                cx_s_scaled = int(cx_solo * scale_x)
-                cy_s_scaled = int(cy_solo * scale_y)
-                cw_s_scaled = int(crop_w_full * scale_x)
-                ch_s_scaled = int(crop_h_full * scale_y)
-                
-                x1s = max(0, cx_s_scaled - cw_s_scaled // 2)
-                x2s = min(1919, x1s + cw_s_scaled)
-                y1s = int(max(0, min(cy_s_scaled - ch_s_scaled // 2, 1080 - ch_s_scaled)))
-                y2s = y1s + ch_s_scaled
-                
-                # 2. split boxes (horizontal)
-                cx_split = width / 2
-                cx_p_scaled = int(cx_split * scale_x)
-                cw_p_scaled = int(crop_w * scale_x)
-                x1p = max(0, cx_p_scaled - cw_p_scaled // 2)
-                x2p = min(1919, x1p + cw_p_scaled)
-                mid_h = (1080 - DIVIDER_HEIGHT) // 2
-                
-                # --- APPLY CLEAR WINDOW (Active) ---
-                if current_layout == "full":
-                    # Clear solo window
-                    frame_dev[y1s:y2s, x1s:x2s] = frame_res[y1s:y2s, x1s:x2s]
-                else:
-                    # Clear split windows
-                    frame_dev[0:mid_h, x1p:x2p] = frame_res[0:mid_h, x1p:x2p]
-                    frame_dev[mid_h + DIVIDER_HEIGHT:1080, x1p:x2p] = frame_res[mid_h + DIVIDER_HEIGHT:1080, x1p:x2p]
-
-                # --- DRAW BOXES (Active Only) ---
-                if current_layout == "full":
-                    cv2.rectangle(frame_dev, (x1s, y1s), (x2s, y2s), (255, 255, 255), 3)
-                else:
-                    cv2.rectangle(frame_dev, (x1p, 0), (x2p, mid_h), (255, 255, 255), 2)
-                    cv2.rectangle(frame_dev, (x1p, mid_h + DIVIDER_HEIGHT), (x2p, 1079), (255, 255, 255), 2)
-
-                # Labels
-                if current_layout == "full":
-                    cv2.putText(frame_dev, f"ACTIVE SOLO: {spk_solo}", (x1s + 10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-                else:
-                    cv2.putText(frame_dev, "ACTIVE SPLIT", (x1p + 10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-
-                # Draw all detected faces (on top of clearing)
-                all_boxes = _get_all_boxes(t)
-                for b in all_boxes:
-                    bx1, by1, bx2, by2 = int(b[0]*scale_x), int(b[1]*scale_y), int(b[2]*scale_x), int(b[3]*scale_y)
-                    cv2.rectangle(frame_dev, (bx1, by1), (bx2, by2), (0, 255, 255), 2)
-
-                # HUD Info
-                now_count = face_count_history[-1] if face_count_history else 0
-                diff_val = avg_diff if 'avg_diff' in locals() else 0
-                
-                hud_lines = [
-                    f"MODE: DYNAMIC SPLIT (DEV)",
-                    f"TIME: {format_seconds(t)}",
-                    f"LAYOUT: {current_layout.upper()}",
-                    f"FACES (NOW): {now_count} | STABLE: {stable_count}",
-                    f"SCENE DIFF: {diff_val:.1f} (Thr: {SCENE_CUT_THRESHOLD})",
-                ]
-                
-                # Scene cut alert
-                if diff_val > SCENE_CUT_THRESHOLD:
-                    hud_lines[-1] += " >> RESET! <<"
-                
-                # Hold status
-                hold_rem = max(0, MIN_HOLD - (t - last_switch_time))
-                if hold_rem > 0:
-                    hud_lines.append(f"SWITCH HOLD: {hold_rem:.1f}s")
-                else:
-                    hud_lines.append(f"SWITCH HOLD: READY")
-                
-                for i, line in enumerate(hud_lines):
-                    cv2.putText(frame_dev, line, (HUD_X, HUD_Y + i*35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, HUD_COLOR, 2)
-
-            # --- DUAL ROUTING LOGIC ---
-            if dual_output:
-                # Resize normal output as base logic does not guarantee 1080x1920 if resolution is off
-                if final_frame.shape[0] != 1920 or final_frame.shape[1] != 1080:
-                    frm_normal = _resize_frame(final_frame, (1080, 1920))
-                else:
-                    frm_normal = final_frame
-                writer_main.stdin.write(frm_normal.tobytes())
-                writer_dev.stdin.write(frame_dev.tobytes())
-                
-            elif merge_output:
-                # Resize normal portrait output to fit the 1080 height evenly
-                frm_normal_small = _resize_frame(final_frame, (608, 1080))
-                
-                # Create dark grey large canvas backdrop
-                frm_merged = np.full((1220, 2648, 3), 30, dtype=np.uint8)
-                
-                # Title texts (Legends)
-                cv2.putText(frm_merged, "DIRECTOR'S CONSOLE (16:9 RAW)", (40, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
-                cv2.putText(frm_merged, "FINAL OUTPUT (9:16 CROP)", (2000, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
-                
-                # Bounding Boxes (Drawn slightly outwards to act as neat white borders)
-                cv2.rectangle(frm_merged, (38, 98), (40+1920+2, 100+1080+2), (255, 255, 255), 4)
-                cv2.rectangle(frm_merged, (1998, 98), (2000+608+2, 100+1080+2), (255, 255, 255), 4)
-                
-                # Paste the literal video frames onto the exact pixel coordinates
-                frm_merged[100:1180, 40:1960] = frame_dev
-                frm_merged[100:1180, 2000:2608] = frm_normal_small
-                
-                writer_main.stdin.write(frm_merged.tobytes())
-                
-            else:
-                # Single Stream Handling
-                output_frm = frame_dev if dev_visualize else final_frame
-                if output_frm.shape[0] != out_h_final or output_frm.shape[1] != out_w_final:
-                    output_frm = _resize_frame(output_frm, (out_w_final, out_h_final))
-                writer_main.stdin.write(output_frm.tobytes())
+            writer_main.stdin.write(final_frame.tobytes())
 
             frame_count += 1
 
@@ -1110,19 +938,10 @@ def render_split_screen_video(
 
         render_bar.close()
 
-        if writer_main:
-            writer_main.stdin.close()
-            stderr_data = writer_main.stderr.read().decode("utf-8", errors="ignore")
-            return_code = writer_main.wait()
-            if return_code != 0:
-                raise RuntimeError(f"The main FFmpeg writer failed: {stderr_data[-1000:]}")
-        
-        if writer_dev:
-            writer_dev.stdin.close()
-            stderr_data_dev = writer_dev.stderr.read().decode("utf-8", errors="ignore")
-            return_code_dev = writer_dev.wait()
-            if return_code_dev != 0:
-                raise RuntimeError(f"The dev-mode FFmpeg writer failed: {stderr_data_dev[-1000:]}")
+        writer_main.stdin.close()
+        stderr_data = writer_main.stderr.read().decode("utf-8", errors="ignore")
+        if writer_main.wait() != 0:
+            raise RuntimeError(f"The FFmpeg writer failed: {stderr_data[-1000:]}")
 
         print(f"✅ {label} done.", flush=True)
 

@@ -7,9 +7,9 @@ import numpy as np
 import mediapipe as mp
 
 from ..progress import ProgressBar
-from .broll import crop_center_broll
+from .broll import crop_center_broll, open_broll_captures, read_broll_frame
 from .face_detection import get_face_detector
-from .utils import format_seconds, _resize_frame, _get_render_dims
+from .utils import _resize_frame, _get_render_dims, make_blur_fill
 from .ffmpeg_utils import detect_video_encoder, open_ffmpeg_video_writer, run_ffmpeg_with_progress
 from .watermark import apply_watermark
 
@@ -66,16 +66,7 @@ def render_camera_switch_video(
     if broll_data is None:
         broll_data = []
 
-    broll_caps = []
-    for br in broll_data:
-        if "filepath" in br and os.path.exists(br["filepath"]):
-            broll_caps.append(
-                {
-                    "start": br["start_time"],
-                    "end": br["end_time"],
-                    "cap": cv2.VideoCapture(br["filepath"]),
-                }
-            )
+    broll_caps = open_broll_captures(broll_data)
 
     # ---------------------------------------------------------------- face detector
     yolo_model = None
@@ -390,60 +381,10 @@ def render_camera_switch_video(
     # Helper: blurred pillarbox for wide-shot / simultaneous speech
     # ----------------------------------------------------------------
     def _make_blurred_pillarbox(frame):
-        h, w = frame.shape[:2]
-        # Background: scale to cover 1080×1920, crop centre, then blur
-        scale = max(out_w / w, out_h / h)
-        new_w = max(out_w, int(w * scale))
-        new_h = max(out_h, int(h * scale))
-        bg = _resize_frame(frame, (new_w, new_h))
-        y0 = (new_h - out_h) // 2
-        x0 = (new_w - out_w) // 2
-        bg = bg[y0 : y0 + out_h, x0 : x0 + out_w]
-        ksize = BLUR_KERNEL if BLUR_KERNEL % 2 == 1 else BLUR_KERNEL + 1
-        bg = cv2.GaussianBlur(bg, (ksize, ksize), BLUR_SIGMA)
-        # Foreground: scale frame to width=out_w, preserve aspect ratio
-        fg_w = out_w
-        fg_h = min(out_h, int(h * out_w / w))
-        fg = _resize_frame(frame, (fg_w, fg_h))
-        # Composite: centre foreground vertically on blurred background
-        result = bg.copy()
-        y_start = (out_h - fg_h) // 2
-        result[y_start : y_start + fg_h, 0:fg_w] = fg
-        return result
-
-    def _get_all_boxes(t):
-        if not all_frame_data:
-            return []
-        if t <= all_frame_data[0]["time"]:
-            return all_frame_data[0]["face_boxes"]
-        if t >= all_frame_data[-1]["time"]:
-            return all_frame_data[-1]["face_boxes"]
-
-        for i in range(len(all_frame_data) - 1):
-            if all_frame_data[i]["time"] <= t <= all_frame_data[i + 1]["time"]:
-                b1s = all_frame_data[i]["face_boxes"]
-                b2s = all_frame_data[i + 1]["face_boxes"]
-                if len(b1s) != len(b2s):
-                    return b1s if abs(t - all_frame_data[i]["time"]) < abs(t - all_frame_data[i+1]["time"]) else b2s
-                t1, t2 = all_frame_data[i]["time"], all_frame_data[i + 1]["time"]
-                frac = (t - t1) / (t2 - t1)
-                res = []
-                for b1, b2 in zip(b1s, b2s):
-                    res.append((
-                        b1[0] + (b2[0] - b1[0]) * frac,
-                        b1[1] + (b2[1] - b1[1]) * frac,
-                        b1[2] + (b2[2] - b1[2]) * frac,
-                        b1[3] + (b2[3] - b1[3]) * frac,
-                    ))
-                return res
-        return []
+        return make_blur_fill(frame, out_w, out_h, cfg)
 
     # PHASE 3: RENDER FRAME
     out_w, out_h = _get_render_dims(cfg, ratio, source_h=height)
-    
-    dev_visualize = cfg.dev_mode # Assume only for 9:16 as described
-    if dev_visualize:
-        out_w, out_h = (1920, 1080)
 
     writer = open_ffmpeg_video_writer(
         output_video, out_w, out_h, orig_fps, video_encoder
@@ -505,94 +446,13 @@ def render_camera_switch_video(
             if t > duration:
                 break
 
-            if cfg.box_face_detection:
-                boxes = _get_all_boxes(t)
-                for b in boxes:
-                    cv2.rectangle(
-                        frame,
-                        (int(b[0]), int(b[1])),
-                        (int(b[2]), int(b[3])),
-                        (0, 255, 255),
-                        3,
-                    )
-
             timestamp_abs = start_clip + t
             active_speakers = get_active_speakers(diarization_data, timestamp_abs)
 
             # tracking_log stores the crop CENTRE (subtitles.py reads it as one).
-            # Seed it per frame: the dev-visualisation branch below never updates
-            # current_speaker, so otherwise cx could stay unbound.
             cx = width // 2
 
-            if dev_visualize:
-                # Dev visualization for camera-switch
-                frame_base = _resize_frame(frame, (out_w, out_h))
-                frame_dev = (frame_base * 0.35).astype(np.uint8)
-                
-                scale_x = out_w / width
-                
-                # Check what state we are in (Wide or Crop)
-                is_wide = False
-                if len(active_speakers) >= 2:
-                    all_multi_scene = all(not speaker_is_solo.get(spk, False) for spk in active_speakers)
-                    if all_multi_scene:
-                        is_wide = True
-                elif len(active_speakers) == 0 and current_speaker is None:
-                    is_wide = True
-                
-                if is_wide:
-                    # Show full frame in dev mode (maybe slightly brightened back or with label)
-                    frame_dev = (frame_base * 0.8).astype(np.uint8)
-                    cv2.putText(frame_dev, "WIDE SHOT", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-                else:
-                    # It's a crop on current_speaker
-                    if current_speaker is not None:
-                        cx, cy, s_zoom = _get_pos_cs(current_speaker, t)
-                        cx_scaled = int(cx * scale_x)
-                        cw_scaled = int(crop_w * scale_x)
-                        
-                        # Paste bright crop
-                        eff_cw = int(crop_w / s_zoom)
-                        lb, rb = int(max(0, min(cx - eff_cw / 2, width - eff_cw))), int(max(0, min(cx + eff_cw / 2, width)))
-                        lb_s, rb_s = int(lb * scale_x), int(rb * scale_x)
-                        frame_dev[:, lb_s : rb_s] = frame_base[:, lb_s : rb_s]
-                        # Vertical lines
-                        cv2.line(frame_dev, (cx_scaled, 0), (cx_scaled, out_h), (255, 255, 255), 2)
-                        cv2.line(frame_dev, (cx_scaled + cw_scaled, 0), (cx_scaled + cw_scaled, out_h), (255, 255, 255), 2)
-                        
-                        label_spk = f"TRACKING: {current_speaker}"
-                        cv2.putText(frame_dev, label_spk, (cx_scaled + 10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-
-                # Force face boxes in dev mode
-                f_boxes = _get_all_boxes(t)
-                for fb in f_boxes:
-                    scale_y = out_h / height
-                    fb1, fb2, fb3, fb4 = int(fb[0]*scale_x), int(fb[1]*scale_y), int(fb[2]*scale_x), int(fb[3]*scale_y)
-                    cv2.rectangle(frame_dev, (fb1, fb2), (fb3, fb4), (0, 255, 255), 2)
-                    
-                    if (cfg.track_lines or cfg.dev_mode) and not is_wide:
-                        # Current crop boundaries
-                        if current_speaker is not None:
-                            cx, cy, s_zoom = _get_pos_cs(current_speaker, t)
-                            eff_cw = int(crop_w / s_zoom)
-                            lb = int(max(0, min(cx - eff_cw / 2, width - eff_cw)))
-                            cx_scaled = int(lb * scale_x)
-                            cw_scaled = int(eff_cw * scale_x)
-                            
-                            mid_x = (fb1 + fb3) // 2
-                            mid_y = (fb2 + fb4) // 2
-                            
-                            # Horizontal lines
-                            cv2.line(frame_dev, (cx_scaled, mid_y), (fb1, mid_y), (0, 255, 255), 2)
-                            cv2.line(frame_dev, (fb3, mid_y), (cx_scaled + cw_scaled, mid_y), (0, 255, 255), 2)
-                            
-                            # Vertical lines
-                            cv2.line(frame_dev, (mid_x, 0), (mid_x, fb2), (0, 255, 255), 2)
-                            cv2.line(frame_dev, (mid_x, fb4), (mid_x, out_h), (0, 255, 255), 2)
-                
-                out_frame = frame_dev
-
-            elif len(active_speakers) >= 2:
+            if len(active_speakers) >= 2:
                 # ... standard logic ...
                 all_multi_scene = all(
                     not speaker_is_solo.get(spk, False) for spk in active_speakers
@@ -659,10 +519,9 @@ def render_camera_switch_video(
             for bc in broll_caps:
                 if bc["start"] <= absolute_time <= bc["end"]:
                     elapsed_broll = absolute_time - bc["start"]
-                    bc["cap"].set(cv2.CAP_PROP_POS_MSEC, elapsed_broll * 1000)
-                    ret_b, frame_b = bc["cap"].read()
+                    frame_b = read_broll_frame(bc, elapsed_broll)
 
-                    if ret_b:
+                    if frame_b is not None:
                         total_broll_duration = bc["end"] - bc["start"]
                         progress_broll = elapsed_broll / total_broll_duration if total_broll_duration > 0 else 0
                         zoom_factor = 1.0 + ((MAX_ZOOM - 1.0) * progress_broll)

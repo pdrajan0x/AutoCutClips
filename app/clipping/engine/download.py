@@ -2,11 +2,19 @@
 clipping.engine.download — Source video download (yt-dlp / gdown).
 """
 
+import glob
 import os
 import re
 import sys
 
+from .. import ytdl
 from ..progress import render_bar
+
+_BOT_CHECK_HINT = (
+    "YouTube is asking this machine to sign in (common on Colab/Kaggle IPs).\n"
+    "      Export cookies.txt from a browser logged in to YouTube and pass it with\n"
+    "      --cookies /path/to/cookies.txt (or set YTDLP_COOKIES_FILE)."
+)
 
 PLATFORM_LABELS = {
     "youtube": "YouTube",
@@ -46,6 +54,37 @@ def _build_ydl_format_selector(download_source_height: str | int) -> str:
         f"bestvideo[height<=?{download_source_height}]{codec_filter}+bestaudio/"
         f"best[height<=?{download_source_height}]{codec_filter}"
     )
+
+
+def source_info_path(video_path: str) -> str:
+    """Where the trimmed source metadata for *video_path* is stored."""
+    return os.path.splitext(video_path)[0] + ".info.json"
+
+
+def _save_source_info(info: dict, video_path: str) -> None:
+    """
+    Keep the fields that tell the AI where a clip comes from (show, channel,
+    guests in the title/description) — the transcript alone rarely names them.
+    """
+    import json
+
+    trimmed = {
+        "title": info.get("title"),
+        "channel": info.get("channel") or info.get("uploader"),
+        "uploader": info.get("uploader"),
+        "upload_date": info.get("upload_date"),
+        "language": info.get("language"),
+        "webpage_url": info.get("webpage_url"),
+        "categories": info.get("categories") or [],
+        "tags": (info.get("tags") or [])[:25],
+        "description": (info.get("description") or "")[:1500],
+        "chapters": [c.get("title") for c in (info.get("chapters") or []) if c.get("title")][:30],
+    }
+    try:
+        with open(source_info_path(video_path), "w", encoding="utf-8") as f:
+            json.dump(trimmed, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        print(f"      ⚠️ Could not save the source metadata: {e}", flush=True)
 
 
 def _extract_gdrive_file_id(url: str) -> str | None:
@@ -108,14 +147,40 @@ def _ydl_progress_hook(d: dict) -> None:
         print(f"\r      Download: {downloaded / 1048576:.0f}MB {spd}   ", end="", flush=True)
 
 
-def _download_subtitles(ydl_opts: dict, url: str, output_path: str) -> None:
-    """Try to fetch YouTube auto/manual subtitles as JSON3 (English, then Indonesian)."""
-    import glob
+def _subtitle_languages(info: dict | None) -> list[str]:
+    """
+    Subtitle tracks in the language actually spoken, best first.
 
+    Asking for "en" on a Hindi video returns YouTube's machine-*translated*
+    English track, which is wrong for captions. Prefer uploaded subtitles in the
+    video's language, then the original-language auto captions ("<lang>-orig").
+    """
+    if not info:
+        return []
+
+    base = str(info.get("language") or "").split("-")[0].lower()
+    manual = list(info.get("subtitles") or {})
+    auto = list(info.get("automatic_captions") or {})
+
+    langs = []
+    if base:
+        langs += [k for k in manual if k.split("-")[0].lower() == base]
+    langs += [k for k in auto if k.endswith("-orig")]
+    if base:
+        langs += [k for k in auto if k.lower() == base]
+    return list(dict.fromkeys(langs))
+
+
+def _download_subtitles(ydl_opts: dict, url: str, output_path: str, langs: list[str]) -> None:
+    """Try to fetch YouTube subtitles as JSON3 in the spoken language."""
     from yt_dlp import YoutubeDL
 
-    print("      Looking for automatic subtitles (en / id)...")
-    for lang in ("en", "id"):
+    if not langs:
+        print("      ℹ️ No original-language subtitles found. Whisper will transcribe instead.")
+        return
+
+    print(f"      Looking for subtitles in the spoken language ({' / '.join(langs)})...")
+    for lang in langs:
         opts = dict(ydl_opts)
         opts.update({
             "writesubtitles": True,
@@ -140,6 +205,7 @@ def download_video(
     use_dlp_subs: bool = False,
     download_source_height: str | int = "max",
     source_platform: str = "youtube",
+    cfg=None,
 ) -> None:
     """
     Download a video to *output_path* at the requested source height.
@@ -148,8 +214,11 @@ def download_video(
     ----------
     source_platform : str
         One of ``"youtube"`` (default), ``"tiktok"``, ``"instagram"`` or ``"gdrive"``.
+    cfg : SimpleNamespace, optional
+        Runtime config; supplies the yt-dlp cookies file.
     """
     from yt_dlp import YoutubeDL
+    from yt_dlp.utils import DownloadError
 
     platform_label = PLATFORM_LABELS.get(source_platform, source_platform)
     is_youtube = source_platform == "youtube"
@@ -170,30 +239,48 @@ def download_video(
         return
 
     if is_youtube:
-        ydl_opts = {
-            "format": _build_ydl_format_selector(download_source_height),
-            "outtmpl": output_path,
-            "quiet": True,
-            "merge_output_format": "mp4",
-            "remote_components": ["ejs:github"],
-            "progress_hooks": [_ydl_progress_hook],
-            "extractor_args": {"youtube": ["player_client=android,web"]},
-        }
+        # No forced player_client: the old extractor_args value was a list, which
+        # yt-dlp silently ignores, and forcing the android client would drop the
+        # cookies (that client does not support them).
+        ydl_opts = ytdl.base_opts(
+            cfg,
+            format=_build_ydl_format_selector(download_source_height),
+            outtmpl=output_path,
+            merge_output_format="mp4",
+            remote_components=["ejs:github"],
+            progress_hooks=[_ydl_progress_hook],
+        )
     else:
         # TikTok / Instagram: make sure video and audio end up merged. Prefer
         # H.264 over H.265 (TikTok's bytevc1), which crashes PyAV/faster-whisper
         # with an IndexError on Kaggle/Colab.
-        ydl_opts = {
-            "format": "bestvideo[vcodec^=h264]+bestaudio/best[vcodec^=h264]/best",
-            "outtmpl": output_path,
-            "quiet": True,
-            "merge_output_format": "mp4",
-            "progress_hooks": [_ydl_progress_hook],
-        }
+        ydl_opts = ytdl.base_opts(
+            cfg,
+            format="bestvideo[vcodec^=h264]+bestaudio/best[vcodec^=h264]/best",
+            outtmpl=output_path,
+            merge_output_format="mp4",
+            progress_hooks=[_ydl_progress_hook],
+        )
+
+    if is_youtube and "cookiefile" in ydl_opts:
+        print(f"      🍪 Using cookies from {ydl_opts['cookiefile']}", flush=True)
+
+    info = None
+    with YoutubeDL(ydl_opts) as ydl:
+        try:
+            info = ydl.extract_info(url, download=False)
+            print(
+                f"      ✅ Downloading: {info.get('height', 'unknown')}p "
+                f"(codec: {info.get('vcodec', 'unknown')}, language: {info.get('language') or 'unknown'})",
+                flush=True,
+            )
+            _save_source_info(info, output_path)
+        except Exception as e:
+            print(f"      ⚠️ Could not read detailed info: {e}", flush=True)
 
     if use_dlp_subs:
         if is_youtube:
-            _download_subtitles(ydl_opts, url, output_path)
+            _download_subtitles(ydl_opts, url, output_path, _subtitle_languages(info))
         else:
             print(
                 f"      ℹ️ {platform_label} provides no automatic subtitles. "
@@ -202,16 +289,11 @@ def download_video(
 
     with YoutubeDL(ydl_opts) as ydl:
         try:
-            info = ydl.extract_info(url, download=False)
-            print(
-                f"      ✅ Downloading: {info.get('height', 'unknown')}p "
-                f"(codec: {info.get('vcodec', 'unknown')})",
-                flush=True,
-            )
-        except Exception as e:
-            print(f"      ⚠️ Could not read detailed info: {e}", flush=True)
-
-        ydl.download([url])
+            ydl.download([url])
+        except DownloadError as e:
+            if "not a bot" in str(e) or "Sign in to confirm" in str(e):
+                raise RuntimeError(f"{e}\n      {_BOT_CHECK_HINT}") from e
+            raise
 
     if not os.path.exists(output_path):
         raise RuntimeError(

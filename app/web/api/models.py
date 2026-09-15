@@ -69,7 +69,12 @@ class WhisperDevice(str, enum.Enum):
 # ---------------------------------------------------------------------------
 
 class JobCreateRequest(BaseModel):
-    """Payload to create a new clipping job."""
+    """
+    Payload to create a new clipping job.
+
+    Every setting is optional: a field left out (None) uses the CLI default from
+    ``clipping.config``, so the web API and the command line cannot drift apart.
+    """
 
     # Source
     url: Optional[str] = Field(None, description="Video URL to process")
@@ -78,41 +83,48 @@ class JobCreateRequest(BaseModel):
     reuse_job_id: Optional[str] = Field(None, description="Existing Job ID to reuse its downloads and JSON")
 
     # Main settings
-    clips: int = Field(7, ge=1, le=30, description="Number of clips to generate")
-    ratio: AspectRatio = Field(AspectRatio.RATIO_9_16, description="Output aspect ratio")
-    source_height: str = Field("max", description="Source download max height")
-    render_height: str = Field("1080", description="Target output height")
+    clips: Optional[int] = Field(None, ge=1, le=30, description="Number of clips to generate")
+    ratio: Optional[AspectRatio] = Field(None, description="Output aspect ratio")
+    source_height: Optional[str] = Field(None, description="Source download max height")
+    render_height: Optional[str] = Field(None, description="Target output height")
+    min_duration: Optional[float] = Field(None, ge=5, le=180, description="Shortest clip length (seconds)")
+    max_duration: Optional[float] = Field(None, ge=5, le=180, description="Longest clip length (seconds)")
 
-    # Content & Hook
-    words_per_sub: int = Field(5, ge=1, le=15)
-    hook_duration: int = Field(3, ge=1, le=10)
-    use_broll: bool = True
-    use_hook_glitch: bool = True
-    use_auto_bgm: bool = True
-    use_karaoke_effect: bool = True
-    use_split_screen: bool = False
-    use_camera_switch: bool = False
-    no_subs: bool = False
+    # Content & hook
+    words_per_sub: Optional[int] = Field(None, ge=1, le=15)
+    hook_duration: Optional[int] = Field(None, ge=1, le=10)
+    hook_teaser: Optional[bool] = None
+    use_hook_glitch: Optional[bool] = Field(None, description="Deprecated alias of hook_teaser")
+    use_broll: Optional[bool] = None
+    use_auto_bgm: Optional[bool] = None
+    use_karaoke_effect: Optional[bool] = None
+    use_split_screen: Optional[bool] = None
+    use_camera_switch: Optional[bool] = None
+    no_subs: Optional[bool] = None
+    no_segment_trim: Optional[bool] = None
+    silence_trim: Optional[bool] = None
 
-    # Hook V2
-    hook_v2: bool = False
-    hook_v2_items: int = Field(3, ge=2, le=6)
-    no_segment_trim: bool = False
-    silence_trim: bool = False
+    # Captions & framing
+    font_style: Optional[FontStyle] = None
+    caption_case: Optional[str] = Field(None, pattern="^(normal|upper)$")
+    title_overlay: Optional[bool] = None
+    layout: Optional[str] = Field(None, pattern="^(auto|crop|blur)$")
+    speaker_tracking: Optional[bool] = None
 
-    # Subtitle & Typography
-    font_style: FontStyle = FontStyle.HORMOZI
+    # Language
+    language: Optional[str] = Field(None, description="Spoken language code, or 'auto'")
+    caption_script: Optional[str] = Field(None, pattern="^(latin|native)$")
 
     # Whisper
-    whisper_model: str = "large-v3"
-    whisper_device: WhisperDevice = WhisperDevice.CUDA
-    whisper_compute_type: str = "float16"
-    use_dlp_subs: bool = False
+    whisper_model: Optional[str] = None
+    whisper_device: Optional[WhisperDevice] = None
+    whisper_compute_type: Optional[str] = None
+    use_dlp_subs: Optional[bool] = None
 
     # AI
-    ai_provider: AIProvider = AIProvider.GEMINI
-    gemini_model: str = "gemini-3-flash-preview"
-    face_detector: FaceDetector = FaceDetector.MEDIAPIPE
+    ai_provider: Optional[AIProvider] = None
+    gemini_model: Optional[str] = None
+    face_detector: Optional[FaceDetector] = None
     # Reuse the saved Gemini response for this job ID instead of calling the API.
     # Left as None when the caller says nothing, so "reuse a job" can default it
     # on while an explicit choice from the UI still wins.

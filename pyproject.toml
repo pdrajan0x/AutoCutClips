@@ -27,6 +27,7 @@ clipping-upload-youtube = "app.cli:upload_youtube"
 clipping-upload-instagram = "app.cli:upload_instagram"
 clipping-reschedule-youtube = "app.cli:reschedule_youtube"
 clipping-youtube-token = "app.cli:youtube_token"
+clipping-learn-youtube = "app.cli:learn_youtube"
 clipping-tracker = "app.tracker.server:main"
 
 [build-system]

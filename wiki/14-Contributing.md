@@ -70,7 +70,7 @@ AutoCutClips/
 │   │   └── studio/           # Video render engine modules
 │   ├── uploaders/            # YouTube + Instagram upload & scheduling logic
 │   ├── tracker/              # YouTube Tracker web app
-│   └── web/                  # Web API and React Dashboard
+│   └── web/                  # Web API for the Studio (static pages in docs/studio)
 ├── pyproject.toml            # Dependencies, metadata & console scripts
 ├── .env.sample                # API key template
 └── wiki/                      # This documentation

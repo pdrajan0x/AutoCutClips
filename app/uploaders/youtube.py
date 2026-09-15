@@ -20,14 +20,20 @@ from googleapiclient.http import MediaFileUpload
 
 from . import youtube_safety as safety
 from .manifest import (
-    get_manifest_row_by_rank,
+    build_description,
+    build_youtube_tags,
+    get_manifest_row,
     get_upload_candidates,
     is_nonempty_file,
     load_json_file,
-    normalize_tags,
+    merge_previous_results,
     normalize_text,
     save_json_file,
 )
+
+# Resumable-upload chunks that hit these are retried instead of failing the clip.
+RETRYABLE_UPLOAD_STATUS = {500, 502, 503, 504}
+MAX_CHUNK_RETRIES = 5
 
 YOUTUBE_SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
@@ -267,8 +273,10 @@ def upload_video_to_youtube(
         or item.get("title")
         or f"Clip Rank {item.get('rank', '?')}"
     )[:100]
-    description = normalize_text(item.get("youtube_description_final", ""))
-    tags = normalize_tags(item.get("youtube_tags_final", []))
+    # The description keeps its line breaks and always ends with the clip's
+    # hashtags (clickable on YouTube); the hashtag words also extend the tags.
+    description = build_description(item)
+    tags = build_youtube_tags(item)
 
     body = {
         "snippet": {
@@ -284,6 +292,12 @@ def upload_video_to_youtube(
         },
     }
 
+    # defaultLanguage is the language of the title/description (English);
+    # defaultAudioLanguage is what is spoken, so a Hindi clip reaches Hindi viewers.
+    audio_language = str(item.get("language") or "").strip()
+    if audio_language:
+        body["snippet"]["defaultAudioLanguage"] = audio_language
+
     publish_at_rfc3339 = None
     if privacy_status == "private" and publish_at_local is not None:
         publish_at_rfc3339 = to_rfc3339_utc(publish_at_local)
@@ -296,8 +310,21 @@ def upload_video_to_youtube(
 
     print(f"   ⬆️ Uploading: {os.path.basename(video_path)}")
     response = None
+    retries = 0
     while response is None:
-        status, response = request.next_chunk()
+        try:
+            status, response = request.next_chunk()
+        except (HttpError, ConnectionError, TimeoutError, OSError) as e:
+            http_status = getattr(getattr(e, "resp", None), "status", None)
+            transient = not isinstance(e, HttpError) or http_status in RETRYABLE_UPLOAD_STATUS
+            if not transient or retries >= MAX_CHUNK_RETRIES:
+                raise
+            retries += 1
+            wait = 2 ** retries
+            print(f"   ⚠️ Upload chunk failed ({e}); retry {retries}/{MAX_CHUNK_RETRIES} in {wait}s...")
+            time.sleep(wait)
+            continue
+        retries = 0
         if status:
             print(f"   ... {int(status.progress() * 100)}%")
 
@@ -386,6 +413,13 @@ def upload_manifest_to_youtube(
         print(f"⚠️ {manifest_file} is empty or missing.")
         return []
 
+    if os.path.abspath(updated_manifest_file) != os.path.abspath(manifest_file):
+        restored = merge_previous_results(
+            render_manifest, load_json_file(updated_manifest_file, default=[]), "youtube_"
+        )
+        if restored:
+            print(f"ℹ️ Restored upload status for {restored} clip(s) from {updated_manifest_file}.")
+
     pending_items = _collect_pending(render_manifest, test_mode)
     if not pending_items:
         print("⚠️ Every successful item has already been uploaded.")
@@ -425,7 +459,7 @@ def upload_manifest_to_youtube(
 
     for item, publish_at_local in zip(pending_items, schedule_times):
         rank = item.get("rank")
-        manifest_row = get_manifest_row_by_rank(updated_manifest, rank)
+        manifest_row = get_manifest_row(updated_manifest, item)
 
         print(f"\n=== Upload rank {rank} ===")
         print(f"Title    : {item.get('youtube_title_final')}")
@@ -460,6 +494,13 @@ def upload_manifest_to_youtube(
                 result["video_id"],
                 result.get("uploaded_title", ""),
                 tz_name,
+                # Kept so `learn-youtube` can relate each video's views to its clip.
+                extra={
+                    key: item[key]
+                    for key in ("on_screen_hook", "hook_text", "duration", "viral_score",
+                                "reason", "language", "hashtags")
+                    if item.get(key) is not None
+                },
             )
 
             print(f"✅ Upload succeeded. Video ID: {result['video_id']}")

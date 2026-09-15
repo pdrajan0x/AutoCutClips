@@ -41,7 +41,7 @@ import requests
 
 from .manifest import (
     get_clip_title_and_description,
-    get_manifest_row_by_rank,
+    get_manifest_row,
     get_upload_candidates,
     load_json_file,
     save_json_file,
@@ -539,7 +539,7 @@ def upload_manifest_to_instagram(
 
     for idx, item in enumerate(pending_items, 1):
         rank = item.get("rank")
-        manifest_row = get_manifest_row_by_rank(updated_manifest, rank)
+        manifest_row = get_manifest_row(updated_manifest, item)
         caption, _ = _instagram_caption(item)
         video_path = item.get("video_path", "")
         now = datetime.now(tz)

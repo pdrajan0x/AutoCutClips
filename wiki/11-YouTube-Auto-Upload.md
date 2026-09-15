@@ -124,13 +124,34 @@ root) that gates how aggressively it's allowed to publish:
 
 ## Metadata
 
-The uploader uses the AI-generated metadata from `metadata_preview.json` /
-`render_manifest.json`:
+The uploader uses the AI-generated metadata from `render_manifest.json`:
 
-- **Title** — YouTube-optimized title
-- **Description** — SEO-friendly description with relevant context
-- **Tags** — Keyword tags for discoverability
-- **TikTok Caption** — Also generated for cross-platform publishing
+- **Title** — the clip's single idea, front-loaded, 40-60 characters
+- **Description** — hook sentence, context sentence, the clip's 10-15 hashtags, then the `Source:` link (line breaks kept)
+- **Tags** — keyword tags plus the hashtag words, within YouTube's 500-character limit
+- **Languages** — `defaultLanguage` is English (the title and description); `defaultAudioLanguage` is the language
+  detected in the audio, so a Hindi clip is recommended to Hindi-speaking viewers
+
+Clips already uploaded are skipped on the next run: the uploader reads the status saved in `--updated-manifest`.
+
+---
+
+## Learn From Your Results (`learn-youtube`)
+
+Once uploads have been public for a couple of days, fetch their view counts:
+
+```bash
+python -m app.cli learn-youtube
+```
+
+This reads the upload history (`upload_log_file` in `upload_safety.json`), asks the YouTube Data API for each
+video's views, likes and comments (1 quota unit per 50 videos, using the existing token), and writes
+`outputs/channel_performance.json`.
+
+Every later clip run shows Gemini the channel's best and weakest clips — views per day over their first week, with
+their on-screen hook, opening line and length — so selection leans towards what works for your audience. It kicks in
+once at least 6 public clips are older than 48 hours. Disable it with `--no-channel-learning`, or point at another
+file with `--performance-file`.
 
 ---
 

@@ -61,11 +61,13 @@ def _load_history(log_file: str) -> list:
         return []
 
 
-def record_upload(log_file: str, video_id: str, title: str, tz_name: str) -> None:
-    """Append one successful upload to the history log."""
+def record_upload(log_file: str, video_id: str, title: str, tz_name: str,
+                  extra: dict | None = None) -> None:
+    """Append one successful upload (plus optional clip details) to the history log."""
     history = _load_history(log_file)
     now = datetime.now(ZoneInfo(tz_name))
     history.append({
+        **(extra or {}),
         "video_id": video_id,
         "title": title,
         "uploaded_at": now.strftime("%Y-%m-%d %H:%M:%S %Z"),

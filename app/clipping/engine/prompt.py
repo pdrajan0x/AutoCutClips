@@ -1,6 +1,11 @@
 """
 clipping.engine.prompt — The clip-selection prompt shared by every AI provider.
 
+The selection rules follow what short-form retention data consistently shows:
+viewers decide to stay or swipe within the first 1-2 seconds, most watch with
+the sound off, and clips that carry one self-contained idea from a cold-open
+hook to a clean payoff are the ones watched to the end.
+
 NOTE ON FIELD NAMES: the JSON keys produced here are the pipeline's data
 contract — ``metadata.py``, the response schemas in ``analysis.py`` and the
 Studio renderers read them by name, so a rename must be applied in all of them.
@@ -8,6 +13,8 @@ Studio renderers read them by name, so a rename must be applied in all of them.
 
 import json
 import os
+
+from ..channel_learning import build_learning_section
 
 # ==============================================================================
 # TARGET ACCOUNT ROUTING
@@ -76,11 +83,38 @@ def load_target_accounts(cfg=None) -> dict:
 TARGET_ACCOUNTS = DEFAULT_TARGET_ACCOUNTS
 
 # ==============================================================================
-# CLIP DURATION BOUNDS (seconds) — change these to shift the allowed clip length
+# CLIP DURATION BOUNDS (seconds) — defaults for --min-duration / --max-duration
 # ==============================================================================
 
 MIN_CLIP_DURATION = 30
 MAX_CLIP_DURATION = 80
+
+# The length most clips should land in; only a story whose payoff genuinely
+# needs the room should run past it.
+SWEET_SPOT_MAX_DURATION = 60
+
+
+def clip_duration_bounds(cfg=None) -> tuple[float, float]:
+    """The (min, max) clip length for this run: --min/--max-duration, else the defaults."""
+    low = getattr(cfg, "min_clip_duration", None) if cfg is not None else None
+    high = getattr(cfg, "max_clip_duration", None) if cfg is not None else None
+    return float(low or MIN_CLIP_DURATION), float(high or MAX_CLIP_DURATION)
+
+
+def _length_rule(cfg) -> str:
+    low, high = clip_duration_bounds(cfg)
+    sweet = max(low, min(SWEET_SPOT_MAX_DURATION, high))
+    rule = (
+        f"- Duration must be {low:g}-{high:g} seconds. Prefer the SHORTEST cut that fully lands the idea"
+    )
+    if sweet < high:
+        rule += (
+            f" — most great clips are {low:g}-{sweet:g} seconds.\n"
+            f"  Only go past {sweet:g} seconds for a story whose payoff genuinely needs the room."
+        )
+    else:
+        rule += "."
+    return rule
 
 
 def _account_routing_section(accounts: dict) -> str:
@@ -104,23 +138,89 @@ def _account_routing_section(accounts: dict) -> str:
     return "\n".join(lines)
 
 
-def _hook_v2_section(cfg) -> str:
-    if not (cfg and getattr(cfg, "hook_v2", False)):
-        return ""
-    items = getattr(cfg, "hook_v2_items", 3)
-    style = getattr(cfg, "hook_v2_style", "controversial_fast_glitch")
-    return f"""
+def _source_section(cfg) -> str:
+    """Describe the source video (title, channel, description) when it is known."""
+    info = getattr(cfg, "source_info", None) if cfg is not None else None
+    if not isinstance(info, dict) or not any(info.get(k) for k in ("title", "channel", "description")):
+        return """
+SOURCE VIDEO: unknown (no title or channel metadata). Identify the show and speakers only from names
+that are clearly said in the transcript; never guess.
+"""
 
-HOOK V2 (MULTI-HOOK INTRO — REQUIRED):
-- In addition to the standard hook, produce a "hook_v2" containing {items} short cuts (0.5-2 seconds) taken from the most striking/controversial/emotional moments inside the clip.
-- Style: {style}
-- Every item must contain: start_time, end_time, and text (a short 2-5 word on-screen caption).
-- Order the items from strongest to weakest.
-- The system adds the transitions between items automatically (white flash / glitch).
-- Fill the "hook_v2" field as an object with:
-  - "enabled": true
-  - "items": an array of objects (start_time, end_time, text)
-  - "transition": an object with "type" ("white_flash" or "glitch")
+    lines = ["", "SOURCE VIDEO (metadata of the long video these clips come from — use it to identify the source):"]
+    for label, key in (("Title", "title"), ("Channel", "channel"), ("Upload date", "upload_date")):
+        if info.get(key):
+            lines.append(f"- {label}: {info[key]}")
+    if info.get("categories"):
+        lines.append(f"- Categories: {', '.join(map(str, info['categories']))}")
+    if info.get("tags"):
+        lines.append(f"- Creator's tags: {', '.join(map(str, info['tags']))}")
+    if info.get("chapters"):
+        lines.append(f"- Chapters: {' | '.join(map(str, info['chapters']))}")
+    if info.get("description"):
+        description = " ".join(str(info["description"]).split())
+        lines.append(f"- Description (truncated): {description}")
+    lines.append(
+        "Use this to work out the show/podcast/channel name and who the host and guests are. The description "
+        "may contain sponsor links and timestamps — ignore those. Only treat a name as confirmed when it appears "
+        "here or is clearly said in the transcript."
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _language_section(cfg) -> str:
+    """Rules for non-English speech: what stays in the transcript's script, what is romanised."""
+    lang = getattr(cfg, "transcript_language", None) if cfg is not None else None
+    spoken = f'"{lang}" (detected)' if lang else "unknown — work it out from the transcript"
+
+    if cfg is not None and getattr(cfg, "caption_script", "latin") == "native":
+        overlay_rule = (
+            "on_screen_hook: in the SAME language as the speech, in that language's own script "
+            "(English speech -> English)."
+        )
+    else:
+        overlay_rule = (
+            "on_screen_hook: if the speech is English, write English. Otherwise write it in the SAME language as the\n"
+            "  speech but in English (Latin) letters — transliterate, do NOT translate — the way people casually type that\n"
+            '  language online, e.g. Hindi speech -> "Paise bachane ka asli tareeka". Never use a non-Latin script.'
+        )
+
+    return f"""
+SPOKEN LANGUAGE: {spoken}
+- The transcript can be in any language or script (Hindi, Tamil, Arabic, Spanish, ...) or mix languages (e.g. Hinglish).
+  Every selection rule applies the same way whatever the language.
+- hook_text and typography_plan words: copy them exactly as written in the transcript, in its own script.
+  The system writes the on-screen captions itself.
+- {overlay_rule}
+- All other metadata (title, descriptions, hashtags, keyword_tags, reason) is written in English.
+"""
+
+
+def _hook_section(cfg, hook_duration: int) -> str:
+    """
+    Hook instructions. They differ with the teaser: when the renderer plays the
+    hook *before* the clip, a hook taken from the clip's opening line would
+    simply be heard twice in a row.
+    """
+    common = """- hook_text MUST be copied verbatim from the transcript — never paraphrase, reword or invent it.
+- hook_start_time and hook_end_time must sit inside the clip's own start_time and end_time.
+- The hook must make people want to keep watching, but must not be fake clickbait."""
+
+    if cfg is not None and getattr(cfg, "hook_teaser", False):
+        return f"""
+HOOK (FLASH-FORWARD TEASER — REQUIRED):
+- The renderer plays the hook as a ~{hook_duration}s teaser BEFORE the clip, then cuts to the clip's start.
+- So take the hook from the clip's peak — the most intense, surprising or quotable line — ideally from the
+  middle or the payoff, NOT from the first sentence of the clip (that would be heard twice in a row).
+- It must be a complete, punchy thought on its own (roughly {hook_duration}-6 seconds of speech) that raises a question the clip answers.
+{common}
+"""
+
+    return f"""
+HOOK (REQUIRED):
+- The clip's own opening IS the hook: start_time must land on the single punchiest sentence, so the hook
+  normally starts at start_time (within the first ~{hook_duration} seconds at most).
+{common}
 """
 
 
@@ -133,14 +233,16 @@ def _segment_trim_section(cfg) -> str:
             "\n- AGGRESSIVELY cut silence and dead air. Do not include pauses "
             "longer than 0.5 seconds."
         )
+    low, _ = clip_duration_bounds(cfg)
     return f"""
 
 SEGMENT-BASED TRIMMING (KEEP SEGMENTS — REQUIRED):
-- For every clip, check whether parts of the middle are uninteresting, too quiet, rambling or filler.
-- If so, break the clip into several "keep_segments" — keep only the best parts.
-- Every segment contains: start_time and end_time.
-- Segments must be in chronological order and must not overlap.
-- If the whole clip is already tight and interesting, emit a single segment covering the full duration.{silence_hint}
+- Every cut inside a clip is a visible jump cut, so only cut what clearly hurts retention: a tangent, a
+  false start, a long pause, crosstalk or filler lasting more than ~2 seconds.
+- If so, break the clip into "keep_segments" — at most 4 — keeping only the parts that carry the idea.
+- Every segment starts and ends on a sentence boundary. Never cut inside a sentence.
+- Segments must be in chronological order, must not overlap, and must add up to at least {low:g} seconds.
+- If the whole clip is already tight, emit a single segment covering start_time to end_time.{silence_hint}
 - Fill the "keep_segments" field as an array of objects (start_time, end_time).
 """
 
@@ -149,40 +251,32 @@ def _json_structure(cfg, accounts: dict) -> str:
     """Build the example JSON, including only the fields actually requested."""
     lines = [
         '    "rank": 1,',
-        '    "viral_score": 95,',
-        '    "start_time": 30.5,',
-        '    "end_time": 90.0,',
-        '    "hook_start_time": 30.5,',
-        '    "hook_end_time": 35.0,',
+        '    "viral_score": 88,',
+        '    "start_time": 312.4,',
+        '    "end_time": 361.9,',
+        '    "hook_start_time": 312.4,',
+        '    "hook_end_time": 316.8,',
         '    "hook_text": "the exact sentence spoken in the hook",',
+        '    "on_screen_hook": "Why most startups die in year two",',
         '    "bgm_mood": "chill",',
         '    "typography_plan": [{ "word": "...", "scale_level": 2, "style": "main", "animation": "bounce_pop" }],',
-        '    "broll_list": [{ "start_time": 40.0, "end_time": 45.0, "search_query": "..." }],',
+        '    "broll_list": [],',
         '    "recommended_visual_broll_hook": [',
         '      { "broll_idea": "...", "search_keyword": "...", "why_it_works": "..." }',
         '    ],',
     ]
 
-    if cfg and getattr(cfg, "hook_v2", False):
-        lines += [
-            '    "hook_v2": {',
-            '      "enabled": true,',
-            '      "items": [{ "start_time": 31.0, "end_time": 32.5, "text": "KEY PHRASE" }],',
-            '      "transition": { "type": "white_flash" }',
-            '    },',
-        ]
-
     if not (cfg is None or getattr(cfg, "no_segment_trim", False)):
         lines += [
             '    "keep_segments": [',
-            '      { "start_time": 30.5, "end_time": 55.0 },',
-            '      { "start_time": 58.0, "end_time": 90.0 }',
+            '      { "start_time": 312.4, "end_time": 335.0 },',
+            '      { "start_time": 338.1, "end_time": 361.9 }',
             '    ],',
         ]
 
     lines += [
         '    "title": "...",',
-        '    "hashtags": "#tag1 #tag2",',
+        '    "hashtags": "#ShowName #GuestName #SpecificTopic #RelatedConcept #NicheCommunity #PodcastClips ...",',
         '    "description_hook": "...",',
         '    "description_context": "...",',
         '    "keyword_tags": ["tag1", "tag2"],',
@@ -221,188 +315,175 @@ def get_analysis_prompt(
     accounts = load_target_accounts(cfg)
 
     return f"""
-You are an Art Director, Video Editor and short-form content metadata strategist for Reels and YouTube Shorts.
+You are a senior short-form video editor who has cut thousands of podcast and interview clips into
+YouTube Shorts, Reels and TikToks that were watched to the end. You are also the channel's metadata strategist.
 
 Read the transcript below. Transcript format:
 [start_second - end_second] text
-
+{_source_section(cfg)}{_language_section(cfg)}
 MAIN TASK:
-- Find the {clip_count} most interesting, strongest, most shareable and most viral-capable moments to turn into short clips.
-- Order the clips from the highest viral_score (most likely to go viral) to the lowest. "rank" is only a sequence number (1, 2, 3...).
-- For every clip, produce the clip timing, hook, typography plan, b-roll plan, the reason it was picked and the metadata.
-- Every output must be highly relevant to the clip itself, not to the full video in general.
+- Find up to {clip_count} moments that will stop the scroll AND be watched to the end as standalone short clips.
+- Return them best first (highest viral_score first). "rank" is only a sequence number (1, 2, 3...).
+- For every clip, produce the timing, hook, on-screen hook, typography plan, b-roll plan, reasoning and metadata.
+- Everything you write must be about the clip itself, not the full episode in general.
 
-CLIP SELECTION & VIRALITY RULES:
-- Clip duration must be {MIN_CLIP_DURATION}-{MAX_CLIP_DURATION} seconds.
-- Pick parts with emotion, conflict, surprise, insight, a strong opinion, a practical lesson or a clear punchline.
-- Judge the viral potential and give a "viral_score" (1-100) representing how viral the clip could go.
-  - 90-100: very likely to go viral — strong emotion or conflict, very punchy hook.
-  - 80-89: interesting, likely to perform well.
-  - 70-79: average, informative but possibly unexciting.
-- Favour parts that stay interesting even without the context of the full video.
-- Do not pick clips that feel flat, rambling or have no clear payoff.
+HOW SHORT-FORM VIEWERS ACTUALLY BEHAVE (the reason for every rule below):
+- They decide to stay or swipe in the first 1-2 seconds. Most of the audience that leaves, leaves before second 3.
+- Most of them watch with the sound OFF at first, so the opening must also work as on-screen text.
+- They have never seen this episode. They do not know the speakers, the earlier discussion or the context.
+- They reward ONE clear idea delivered fast, and they punish setup, rambling and endings that fizzle out.
 
-CLIP DISTINCTNESS (STRICT — HARD REQUIREMENT):
-- The clips MUST NOT overlap in time. No two clips may share any second of the transcript.
-- Every clip must make a genuinely different point. Do not return several clips arguing the same thing in different words.
-- Spread the clips across the whole transcript instead of clustering them in one section.
-- If the transcript genuinely contains fewer than {clip_count} strong, distinct moments, return FEWER clips. A short list of strong, distinct clips is far better than a padded one.
-- Never invent, pad or stretch a weak moment just to reach {clip_count}.
+STEP 1 — BUILD A CANDIDATE POOL (internally, do not output it):
+Read the WHOLE transcript first. Internally list about {clip_count * 3} candidate moments, then keep only the best.
+A strong candidate usually has one of these shapes:
+- Contrarian or bold claim: "Everyone thinks X. It's actually Y."
+- Surprising specific number, result or fact that lands against expectation.
+- Hard-won lesson or expert authority: "The biggest mistake I made...", "After 20 years of doing this..."
+- A story that starts in the middle of the action and has a turn or punchline.
+- A confession, vulnerable admission or raw emotional moment.
+- Real tension: a disagreement, a pushback, a speaker being challenged.
+- A specific, practical framework or how-to that people will save.
+- A funny exchange with a clear punchline.
+
+STEP 2 — QUALITY GATE (a candidate must pass EVERY test, otherwise discard it):
+1. COLD-OPEN TEST: the first words spoken at start_time are already interesting. The clip must NOT open on
+   filler or run-up: "so", "yeah", "um", "and", "but", "like I said", "that's a great question", "you know what",
+   a greeting, throat-clearing, or the tail of the previous sentence.
+2. STRANGER TEST: someone who never saw the episode fully understands it. No unresolved "he / she / they / that /
+   this / it" pointing to something said before start_time. No "as we discussed", no inside references.
+3. ONE-IDEA TEST: the clip makes exactly one point. Two points = two clips (or pick the stronger one).
+4. PAYOFF TEST: the answer, punchline, twist, lesson or conclusion lands INSIDE the window.
+5. ENDING TEST: the last sentence feels final — a punchline, a conclusion, a strong line. It must not trail
+   into "yeah", "right", "anyway", laughter that goes nowhere, or the first words of a new topic.
+6. DENSITY TEST: no long tangents, dead air, crosstalk or repeated explanations inside the window.
 
 REJECT THESE OUTRIGHT (never return them as clips):
-- Intros, outros, sponsor reads, housekeeping, or "welcome back to the podcast".
+- Intros, outros, sponsor reads, housekeeping, "welcome back to the podcast", calls to subscribe.
 - Moments that only make sense with visual context the viewer will not have.
-- Answers to a question that is never heard inside the clip itself.
+- Answers to a question that is never heard inside the clip, when the answer does not stand alone.
 - Long setups where the payoff lands outside the clip window.
 - Inside jokes or references that need the rest of the episode to land.
 
-RETENTION & CLIP STRUCTURE RULES:
-- Make sure the first 3 seconds are strong: a hook, conflict, curiosity, a sharp statement, emotion or an implicit question.
-- The ideal clip has the structure:
-  hook -> brief context -> tension/insight -> payoff.
-- Do not pick clips that only become interesting after a long run-up.
-- If the start of a segment is too slow, move start_time to a stronger sentence.
-- Once the payoff is done, do not extend the clip without a reason.
-- Favour clips that make the viewer want to:
-  1. stop scrolling,
-  2. watch to the end,
-  3. comment,
-  4. share,
-  5. save,
-  6. or feel "this is so me".
-
-TIMING / CUTTING RULES:
-- start_time must begin as close as possible to the first strong moment, not merely at the start of a topic.
-- end_time must stop after the payoff, conclusion, punchline or main emotional beat is finished.
-- Start and end on sentence boundaries — never mid-word or mid-clause.
-- Do not cut too early while a sentence is still hanging.
-- Do not keep running long after the core message is finished.
-- The clip must still make sense without watching what comes before or after it.
-- If two strong moments are very close together and support each other, they may be merged as long as the duration stays within {MIN_CLIP_DURATION}-{MAX_CLIP_DURATION} seconds.
-- If two strong moments have different angles, split them into separate clip candidates.
+STEP 3 — CUT PRECISELY:
+- start_time = the start of the line containing the first strong sentence. If the best material begins in the
+  middle of an answer, start there. Include the interviewer's question only when it is short (under ~5 seconds),
+  sharp, and the answer needs it.
+- end_time = the end of the line containing the payoff. Stop right after it lands.
+- A line can hold several sentences. When the strong sentence begins (or the payoff ends) partway through a line,
+  estimate that moment inside the line — speech runs at a roughly even pace — rather than taking the whole line.
+- The system snaps both cut points to exact word boundaries and adds breathing room — do NOT pad the times yourself,
+  and never choose a time that falls in the middle of a sentence.
+{_length_rule(cfg)}
+- Structure inside the window: hook (0-3s) -> just enough context -> escalation/tension -> payoff.
 - Every timestamp must fall inside the range covered by the transcript. Never emit a timestamp past the final line.
 
-INTERNAL VIRAL_SCORE BREAKDOWN:
-Score viral_score 1-100 from the components below. This is for internal scoring only — DO NOT add new fields to the JSON.
-- Hook strength: 1-20
-- Emotional intensity: 1-20
-- Shareability / comment potential: 1-20
-- Standalone clarity: 1-20
-- Payoff / retention: 1-20
+CLIP DISTINCTNESS (STRICT — HARD REQUIREMENT):
+- Clips MUST NOT overlap in time. No two clips may share any second of the transcript.
+- Every clip must make a genuinely different point. Do not return several clips arguing the same thing.
+- Spread the clips across the whole transcript instead of clustering them in one section.
+- If the transcript genuinely contains fewer than {clip_count} moments that pass the quality gate, return FEWER clips.
+  Three excellent clips are far better than {clip_count} mediocre ones. Never pad, stretch or invent a weak moment.
 
-Scoring guidance:
-- Hook strength: how strongly the first 3 seconds stop the scroll.
-- Emotional intensity: how strong the emotion, conflict, frustration, humour, tenderness, anger, awe or relatability is.
-- Shareability / comment potential: how likely people are to comment, debate, tag a friend, share or save.
-- Standalone clarity: how easily the clip is understood without the full video.
-- Payoff / retention: how clear the reward for watching to the end is — punchline, insight, twist, conclusion or practical lesson.
-- Be honest and calibrated. Do not give everything 90+. If a clip is merely decent, score it in the 70s.
-- Do not return clips scoring below 70 unless the transcript has very few good moments.
-{_account_routing_section(accounts)}
-
-HOOK (REQUIRED):
-- Take the single punchiest sentence that EXISTS INSIDE the clip.
-- The hook must feel strong and grab attention within the first ~{hook_duration} seconds.
-- Store its timing as hook_start_time and hook_end_time, and its exact wording as hook_text.
-- hook_text MUST be copied verbatim from the transcript — never paraphrase, reword or invent it.
-- hook_start_time and hook_end_time must sit inside the clip's own start_time and end_time.
-- The hook must make people want to keep watching, but must not be fake clickbait.
-- If the best hook is not right at the start of the candidate clip, adjust start_time so the hook appears as early as possible.
+VIRAL_SCORE (1-100) — score honestly from these five components (internal only, DO NOT add fields):
+- Hook strength (1-20): would the first 2 seconds, heard or read as text, stop a stranger's thumb?
+- Emotional intensity (1-20): conflict, surprise, humour, vulnerability, anger, awe, relatability.
+- Shareability (1-20): would people comment, argue, tag a friend, share or save it?
+- Standalone clarity (1-20): fully understood with zero context?
+- Payoff & ending (1-20): is there a clear reward, and does the clip end the moment it lands?
+Calibration: 90+ is rare — a clip you would bet on. 80-89 is strong. 70-79 is decent but ordinary.
+Do not give everything 90+. Do not return clips below 70 unless the transcript has almost no good moments.
+{build_learning_section(cfg)}{_account_routing_section(accounts)}
+{_hook_section(cfg, hook_duration)}
+ON-SCREEN HOOK (REQUIRED — for sound-off viewers):
+- "on_screen_hook" is a text overlay shown at the top of the screen during the opening seconds.
+- 3-7 words, at most 42 characters. It states the promise or tension of the clip so a muted viewer stops scrolling.
+- Write it as a sharp headline, not a transcript quote, in the language set by SPOKEN LANGUAGE: e.g. "The mistake that cost me $2M",
+  "Why he quit Google after 10 years", "Nobody tells you this about sleep".
+- It must be true to the clip. No emojis, no hashtags, no ALL CAPS, no fake promises.
 
 TYPOGRAPHY PLAN (KINETIC TYPOGRAPHY):
 - Pick the 3-6 heaviest, most emotional or most emphasis-worthy SINGLE words from each clip.
-- Every word MUST actually be spoken inside the clip's time range.
+- Every word MUST actually be spoken inside the clip's time range, spelled exactly as in the transcript.
 - For each word, decide:
-  1. 'word': that specific word, spelled exactly as in the transcript.
-  2. 'scale_level': 1, 2 or 3.
-     - 1 = normal/small
-     - 2 = large/emphasis
-     - 3 = giant/crucial
+  1. 'word': that specific word.
+  2. 'scale_level': 1 (normal), 2 (large/emphasis) or 3 (giant/crucial — use at most once per clip).
   3. 'style': "main" or "accent".
   4. 'animation': "bounce_pop" or "stagger_up".
-- Do not pick long phrases. Single words only.
-- Prioritise the words that are strongest emotionally, in meaning or in visual retention.
+- Prefer numbers, strong verbs and loaded nouns ("million", "fired", "never", "quit"). Never filler words.
 
-B-ROLL (REQUIRED WHERE RELEVANT):
-- Find at most 1-3 moments in the clip that suit a B-roll / stock footage insert.
-- Each B-roll runs 3-7 seconds.
-- Provide:
-  - start_time
-  - end_time
-  - search_query
-- search_query must be short, clear and in English.
-- Do not place B-roll at the same seconds as the hook.
-- Only add B-roll when it genuinely helps visualise what is being said.
-- If no moment fits, set broll_list to an empty array [].
+B-ROLL (ONLY WHEN IT CLEARLY HELPS — EMPTY IS THE DEFAULT):
+- B-roll replaces the speaker's face on screen, and the face carries most of the emotion, so use it sparingly.
+- Add at most 1-2 inserts, and only when the speaker names something concrete and filmable
+  (a place, an object, an activity: "stock market crash", "surgeon operating", "desert road").
+- Never during the hook, the payoff, an emotional moment, a joke, or abstract talk (ideas, feelings, opinions).
+- Each insert runs 3-5 seconds. search_query is 2-4 plain English words describing literal footage.
+- If no moment clearly qualifies, set broll_list to an empty array [].
 
-VISUAL B-ROLL HOOK (FIRST 0-3 SECONDS):
-- Give 2-5 opening B-roll ideas that are contrasting, funny, dramatic or curiosity-provoking, to play before the original video starts.
-- Include a search keyword for the editor.
-- This goes in the 'recommended_visual_broll_hook' object and is only a reference if the editor wants to source footage manually for the first 3 seconds.
+VISUAL B-ROLL HOOK (REFERENCE ONLY):
+- Give 2-5 contrasting, funny, dramatic or curiosity-provoking opening B-roll ideas an editor could source manually.
+- Include a search keyword for each. This goes in 'recommended_visual_broll_hook' and is never rendered automatically.
 
 BGM MOOD (BACKGROUND MUSIC):
-- Analyse the clip's emotion and topic.
-- Pick ONE background-music mood that fits best from this fixed list: [chill, epic, sad, upbeat, suspense].
-- Make sure the mood matches the story. (For example: a hard-struggle story = sad/epic, a funny/relaxed story = chill/upbeat.)
-
-SLOW CLOSING:
-- end_time MUST be padded by +0.10 to +0.85 seconds after the last word so the ending breathes instead of being cut off abruptly.
+- The music sits quietly under the voice. Pick ONE mood from this fixed list: [chill, epic, sad, upbeat, suspense].
+- Match the emotional tone, not the topic: calm advice or discussion = chill; ambition, triumph or big stakes = epic;
+  loss, struggle or regret = sad; light, funny or energetic = upbeat; mystery, danger or a reveal = suspense.
 
 SELECTION REASONING:
-- Fill the 'reason' field with a short explanation of why this clip is worth picking.
-- Explain the clip's main viral trigger, why people are likely to watch to the end, and why it stays interesting without the full video.
+- Fill 'reason' with 1-2 sentences: the hook shape, why a stranger stays to the end, and what the payoff is.
 
 METADATA LANGUAGE:
-- ALL metadata must be in natural, concise, readable English.
-- Never output any other language in any field.
-- Avoid stiff literal translations and generic filler phrasing.
+- title, hashtags, description_hook, description_context, keyword_tags and reason must be natural, concise,
+  readable English — even when the speech is in another language.
+- on_screen_hook, hook_text and typography words follow the SPOKEN LANGUAGE rules above.
 
 METADATA:
-Produce the following metadata for every clip:
-
 1. title
-- Natural, strong, sharp, readable English.
-- At most 100 characters.
-- Focus on one main idea, relevant to the clip and not to the full video.
-- No cheap clickbait, no ALL CAPS, no excessive punctuation such as !!! ???
-- Do not be generic.
+- The single idea of the clip, front-loaded with the most searchable or intriguing words.
+- Aim for 40-60 characters (mobile truncates longer titles); hard maximum 100 characters.
+- No cheap clickbait, no ALL CAPS, no "!!!" or "???", no emojis, not generic.
+- Must complement the on_screen_hook, not repeat it word for word.
 
 2. hashtags
-- Exactly 2 to 3 hashtags in a single string, separated by spaces.
-- Directly relevant to the clip's topic, no duplicates.
-- Avoid overly generic tags such as #fyp #viral #trending unless genuinely relevant.
-- Format: #mindset #career #productivity
+- 10 to 15 hashtags in one string, separated by spaces. NEVER more than 15 (YouTube ignores every hashtag
+  on a video that has more than 15).
+- Hashtags are for discovery: someone searching for the show, the person or the subject should find this clip.
+  Build them in this order (YouTube shows the first three above the title, so the most identifying go first):
+  a. SOURCE (2-4): the show / podcast / channel name and the people speaking in this clip (host, guest),
+     e.g. #DiaryOfACEO #StevenBartlett #AndrewHuberman. Only confirmed names from the SOURCE VIDEO section
+     or clearly said in the transcript — never guess a name. If the source is unknown, skip this group.
+  b. SUBJECT (4-6): the specific topics, entities and concepts discussed in THIS clip — companies, products,
+     places, events, methods, fields — e.g. #IntermittentFasting #Dopamine #Tesla #VentureCapital.
+  c. NICHE / COMMUNITY (2-3): the audience that follows this subject, e.g. #Entrepreneurship #Neuroscience #Biohacking.
+  d. FORMAT (1-2): e.g. #PodcastClips #Interview #Shorts.
+- Do NOT make hashtags out of the caption's emotion or mood (#shocking #mindblown #sad #inspiring #deep) —
+  describe who and what the clip is about, not how it feels.
+- Never use #fyp #foryou #viral #trending #explore.
+- CamelCase, letters and digits only, no spaces or punctuation, no duplicates.
 
 3. description_hook
-- Exactly 1 sentence.
-- The opening sentence of the description: short, strong and curiosity-provoking.
-- No fake clickbait.
+- Exactly 1 sentence: short, curiosity-provoking, true to the clip.
 
 4. description_context
-- Exactly 1 sentence.
-- Briefly explains the clip's main context and matches what is discussed in the clip.
+- Exactly 1 sentence explaining who is speaking about what (use names only if they are said in the transcript).
 
 5. keyword_tags
-- 5 to 8 short keywords (not hashtags), relevant to the clip.
-- Favour keywords people would actually search for. Avoid keyword spam.
-- Mainly used for YouTube metadata.
+- 5 to 8 short keywords people would actually search for (not hashtags). No keyword spam.
+- Include the show/channel name and the speakers' names when they are confirmed, then the clip's subject keywords.
 
 METADATA QUALITY RULES:
-- All metadata must match the clip, not the long video in general.
-- Do not promise anything the clip does not discuss.
-- Do not use fake hyperbole such as "100% guaranteed" unless it is explicitly stated in the clip.
-- If there is a number, a strong phrase or a sharp statement in the original speech, prioritise it as title inspiration.
-- Title, descriptions and hashtags must complement each other rather than repeat the same sentence.
+- Match the clip, never promise anything the clip does not deliver, no fake hyperbole.
+- If the speech contains a striking number or phrase, prefer it as title inspiration.
+- Title, on-screen hook, descriptions and hashtags complement each other rather than repeating one sentence.
 
 OUTPUT RULES:
 - The output MUST be a valid JSON array.
 - Do not add any explanation outside the JSON.
-- Every field shown in the structure below must be filled.
+- Every field shown in the structure below must be filled (broll_list may be []).
 - Do not add fields that are not shown in the structure below.
-- When in doubt, prioritise accuracy about the clip over excessive creativity.
-{_hook_v2_section(cfg)}{_segment_trim_section(cfg)}
+- When in doubt, prioritise accuracy about the clip over creativity.
+{_segment_trim_section(cfg)}
 
-REQUIRED JSON STRUCTURE (follow these field names exactly):
+REQUIRED JSON STRUCTURE (follow these field names exactly; the values are only illustrative):
 {_json_structure(cfg, accounts)}
 
 Transcript:

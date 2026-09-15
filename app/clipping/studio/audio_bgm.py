@@ -33,18 +33,24 @@ def get_local_bgm_file(mood, bgm_dir):
     return os.path.abspath(os.path.join(mood_dir, selected_file))
 
 
+# Normalise every clip to the loudness Shorts/Reels/TikTok play back at.
+# Podcast sources vary by 10+ dB, and amix halves each input's level, so without
+# this the voice lands noticeably quieter than the clips around it in the feed.
+LOUDNORM_FILTER = "loudnorm=I=-14:TP=-1.5:LRA=11"
+
+
 def build_bgm_filter(bgm_mode, bgm_base_volume, audio_input_voc="[1:a]", audio_input_bgm="[2:a]"):
     """
     Build the FFmpeg filter_complex string for BGM mixing.
 
     Args:
         bgm_mode (str): 'ducking' for sidechain compress, 'background' for constant volume mix.
-        bgm_base_volume (float): Base volume level for BGM (e.g. 0.25).
+        bgm_base_volume (float): Base volume level for BGM (e.g. 0.12).
         audio_input_voc (str): FFmpeg stream label for vocal audio input.
         audio_input_bgm (str): FFmpeg stream label for BGM audio input.
 
     Returns:
-        str: The filter_complex string for FFmpeg.
+        str: The filter_complex string for FFmpeg, ending in ``[a_out]``.
     """
     voc_format = f"{audio_input_voc}aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=1.2[voc]"
     bgm_format = f"{audio_input_bgm}aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume={bgm_base_volume}[bgm]"
@@ -54,7 +60,8 @@ def build_bgm_filter(bgm_mode, bgm_base_volume, audio_input_voc="[1:a]", audio_i
         return (
             f"{voc_format}; "
             f"{bgm_format}; "
-            f"[voc][bgm]amix=inputs=2:duration=first[a_out]"
+            f"[voc][bgm]amix=inputs=2:duration=first[a_mix]; "
+            f"[a_mix]{LOUDNORM_FILTER}[a_out]"
         )
     else:
         # Ducking mode (default) — sidechain compress makes BGM duck under vocals
@@ -63,5 +70,6 @@ def build_bgm_filter(bgm_mode, bgm_base_volume, audio_input_voc="[1:a]", audio_i
             f"{bgm_format}; "
             f"[voc]asplit=2[voc_sc][voc_mix]; "
             f"[bgm][voc_sc]sidechaincompress=threshold=0.08:ratio=5.0:attack=100:release=1000[bgm_ducked]; "
-            f"[voc_mix][bgm_ducked]amix=inputs=2:duration=first[a_out]"
+            f"[voc_mix][bgm_ducked]amix=inputs=2:duration=first[a_mix]; "
+            f"[a_mix]{LOUDNORM_FILTER}[a_out]"
         )

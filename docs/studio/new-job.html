@@ -160,11 +160,23 @@
                                 <div>
                                     <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Font Style</label>
                                     <select id="input-font" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-900 dark:text-white">
-                                        <option value="HORMOZI">Hormozi (Bold)</option>
-                                        <option value="DEFAULT">Default (Montserrat)</option>
+                                        <option value="DEFAULT">Default (Montserrat Black)</option>
+                                        <option value="HORMOZI">Hormozi (Anton keywords)</option>
                                         <option value="STORYTELLER">Storyteller (Inter)</option>
                                         <option value="CINEMATIC">Cinematic (Bebas Neue)</option>
                                     </select>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Min Length (s)</label>
+                                        <input id="input-min-duration" type="number" min="5" max="180" value="30"
+                                            class="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-900 dark:text-white">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Max Length (s)</label>
+                                        <input id="input-max-duration" type="number" min="5" max="180" value="80"
+                                            class="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-900 dark:text-white">
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -236,10 +248,11 @@
         // Feature toggles config
         const TOGGLES = [
             { id: 'use_broll', label: 'B-Roll Footage', desc: 'Insert stock footage', default: true },
-            { id: 'use_hook_glitch', label: 'Hook Glitch', desc: 'Glitch transition intro', default: true },
+            { id: 'hook_teaser', label: 'Hook Teaser', desc: 'Flash-forward to the peak line first', default: false },
             { id: 'use_auto_bgm', label: 'Background Music', desc: 'Auto BGM matching', default: true },
-            { id: 'use_karaoke_effect', label: 'Karaoke Effect', desc: 'Word-by-word highlight', default: true },
-            { id: 'hook_v2', label: 'Hook V2', desc: 'Multi-hook intro clips', default: false },
+            { id: 'use_karaoke_effect', label: 'Karaoke Effect', desc: 'Highlight the spoken word', default: true },
+            { id: 'title_overlay', label: 'Headline Overlay', desc: 'Hook text on top for muted viewers', default: true },
+            { id: 'speaker_tracking', label: 'Follow the Speaker', desc: 'Frame whoever is talking', default: true },
             { id: 'silence_trim', label: 'Silence Trim', desc: 'Remove dead air', default: false },
             { id: 'use_dlp_subs', label: 'YouTube Subs', desc: 'Skip Whisper if available', default: false },
             { id: 'no_subs', label: 'No Subtitles', desc: 'Render without text', default: false },
@@ -316,6 +329,8 @@
                     clips: parseInt(document.getElementById('input-clips').value) || 7,
                     ratio: document.getElementById('input-ratio').value,
                     font_style: document.getElementById('input-font').value,
+                    min_duration: parseFloat(document.getElementById('input-min-duration').value) || undefined,
+                    max_duration: parseFloat(document.getElementById('input-max-duration').value) || undefined,
                     whisper_model: document.getElementById('input-whisper').value,
                     whisper_device: document.getElementById('input-device').value,
                     ai_provider: document.getElementById('input-ai').value,

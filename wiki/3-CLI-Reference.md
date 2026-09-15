@@ -14,10 +14,12 @@ clip/story pipeline (so the historical `--url ...` invocation still works).
 |---|---|---|
 | `clip` (default) | `clipping` | Runs the auto-clip pipeline |
 | `story` | `clipping story` | Same pipeline, with `--story-mode` implied |
+| `queue` | `clipping queue` | Clips every URL in a links file, one after another |
 | `upload-youtube` | `clipping-upload-youtube` | Uploads/schedules clips to YouTube |
 | `upload-instagram` | `clipping-upload-instagram` | Publishes clips as Instagram Reels |
 | `reschedule-youtube` | `clipping-reschedule-youtube` | Re-spaces already-scheduled YouTube videos |
 | `youtube-token` | `clipping-youtube-token` | Generates/verifies the YouTube OAuth token |
+| `learn-youtube` | `clipping-learn-youtube` | Fetches views for uploaded clips so selection learns from them |
 
 This page covers the **clip/story pipeline** flags only. For the uploader and
 token subcommands see [YouTube Auto-Upload](YouTube-Auto-Upload), [Instagram
@@ -32,9 +34,12 @@ Reels Uploader](Instagram-Reels-Uploader), and the
 |---|---|---|
 | `--url`, `-u` | — | Video URL to process (**Required** unless `--story-mode`) |
 | `--source` | `youtube` | Video source platform: `youtube`, `tiktok`, `instagram`, `gdrive` |
+| `--cookies` | — | Netscape `cookies.txt` for yt-dlp (fixes YouTube's bot check on Colab/Kaggle); also `$YTDLP_COOKIES_FILE` |
 | `--tiktok` | — | **[Deprecated]** Use `--source tiktok` instead |
-| `--clips`, `-n` | `7` | Number of highlight clips to generate |
+| `--clips`, `-n` | `7` | Maximum number of clips (the AI returns fewer when a video has fewer great moments) |
 | `--ratio`, `-r` | `9:16` | Output aspect ratio: `9:16`, `16:9`, `1:1`, `3:4`, `4:5` |
+| `--min-duration` | `30` | Shortest clip length in seconds |
+| `--max-duration` | `80` | Longest clip length in seconds (up to 180 for Shorts) |
 | `--source-height` | `max` | Preferred source download max height (`max`, `1080`, `1440`, `2160`) |
 | `--render-height` | `1080` | Target output render height (`1080`, `1440`, `2160`, `source`) |
 
@@ -49,8 +54,10 @@ Reels Uploader](Instagram-Reels-Uploader), and the
 | `--gemini-fallback-model` | `gemini-2.5-flash` | Fallback model if main model fails |
 | `--nvidia-model` | `deepseek-ai/deepseek-v4-pro` | Model name for NVIDIA NIM API |
 | `--load-gemini-json` | `False` | Load saved `gemini_response.json` to bypass AI call |
-| `--target-accounts` | `target_accounts.json` | Path to the account-routing config used to classify each clip. Falls back to built-in defaults if the file is missing |
-| `--no-account-routing` | `False` | Skip account classification entirely, so the AI focuses on clip selection and metadata |
+| `--target-accounts` | `target_accounts.json` | Path to the account-routing config used to classify each clip |
+| `--no-account-routing` | `False` | Skip account classification entirely |
+| `--performance-file` | `outputs/channel_performance.json` | Channel results from `learn-youtube`, shown to the AI |
+| `--no-channel-learning` | `False` | Don't show the AI how earlier clips performed |
 
 ---
 
@@ -58,26 +65,22 @@ Reels Uploader](Instagram-Reels-Uploader), and the
 
 | Argument | Default | Description |
 |---|---|---|
-| `--words-per-sub` | `5` | Max words per karaoke subtitle group |
+| `--words-per-sub` | `3` | Max words per caption group |
+| `--hook-teaser` | `False` | Open with a flash-forward to the clip's peak line, then a clean cut |
 | `--hook-duration` | `3` | Hook teaser duration (seconds) |
-| `--hook-source` | `None` | Path or URL for custom hook video (.mp4) |
+| `--hook-source` | `None` | Path or URL for a custom hook video (.mp4), played as the teaser |
 | `--hook-source-start` | `0.0` | Start time in seconds for custom hook |
 | `--no-broll` | — | Disable B-roll footage |
-| `--no-hook` | — | Disable hook glitch teaser (V1) |
 | `--no-bgm` | — | Disable background music |
 | `--no-subs` | — | Disable all subtitle rendering |
-| `--no-karaoke` | — | Use clean text instead of karaoke highlight |
+| `--no-karaoke` | — | No spoken-word highlight |
 
 ---
 
-## Hook V2 & Segment Trimming
+## Segment Trimming
 
 | Argument | Default | Description |
 |---|---|---|
-| `--hook-v2` | `False` | Enable Multi-Hook Intro V2 mode |
-| `--hook-v2-items` | `3` | Number of micro-hooks to generate |
-| `--hook-v2-style` | `controversial_fast_glitch` | Style prompt for AI hook selection |
-| `--white-flash-duration` | `0.12` | Duration of flash transition between hooks (seconds) |
 | `--no-segment-trim` | `False` | Disable AI segment trimming (render full clip) |
 | `--silence-trim` | `False` | Aggressively trim silence/dead air |
 
@@ -87,9 +90,19 @@ Reels Uploader](Instagram-Reels-Uploader), and the
 
 | Argument | Default | Description |
 |---|---|---|
-| `--font-style` | `HORMOZI` | Font preset: `DEFAULT`, `STORYTELLER`, `HORMOZI`, `CINEMATIC` |
-| `--advanced-text` | `False` | Enable kinetic typography (word scaling & animation) |
-| `--advanced-text-hook` | `False` | Enable kinetic typography on hook teaser |
+| `--font-style` | `DEFAULT` | Font preset: `DEFAULT`, `STORYTELLER`, `HORMOZI`, `CINEMATIC` |
+| `--caption-case` | `normal` | `normal` or `upper` (UPPERCASE captions) |
+| `--simple-captions` | `False` | Plain one-line karaoke captions instead of the kinetic style |
+| `--no-title-overlay` | `False` | Disable the AI headline at the top of the frame |
+
+---
+
+## Language
+
+| Argument | Default | Description |
+|---|---|---|
+| `--language` | `auto` | Spoken language code (`hi`, `en`, `ta`, ...); `auto` uses YouTube's language, then Whisper detection |
+| `--caption-script` | `latin` | `latin` writes non-Latin speech in English letters (never translated); `native` keeps the original script |
 
 ---
 
@@ -98,6 +111,8 @@ Reels Uploader](Instagram-Reels-Uploader), and the
 | Argument | Default | Description |
 |---|---|---|
 | `--bgm-mode` | `ducking` | `ducking` (auto-lower during speech) or `background` (constant low volume) |
+| `--bgm-dir` | `assets/bgm` | Folder with `chill/ epic/ sad/ upbeat/ suspense/` subfolders of your own music |
+| `--bgm-volume` | `0.12` | Music volume before ducking |
 
 ---
 
@@ -112,15 +127,6 @@ Reels Uploader](Instagram-Reels-Uploader), and the
 | `--voiceover-length` | `short` | `short` (~10s), `normal` (~30s), or `long` (~50s) |
 | `--voiceover-volume` | `1.0` | Volume of the voice-over track |
 | `--original-volume` | `0.15` | Volume of the original video audio while the voice-over plays |
-
----
-
-## Video Effects (Ambient Glow)
-
-| Argument | Default | Description |
-|---|---|---|
-| `--edge-glow` | `False` | Apply ambient edge glow to the entire output video (hook, clip, broll, voiceover). By default, glow only appears on voice-over intros. |
-| `--edge-glow-mode` | `smooth` | Edge glow rendering strategy: `default` (original 10s loop, may stutter at loop points), `smooth` (10s loop with auto-adjusted speed for seamless loop), `full` (renders full duration, heavier but zero stutter). |
 
 ---
 
@@ -147,7 +153,7 @@ Reels Uploader](Instagram-Reels-Uploader), and the
 | `--dynamic-split` | `False` | Auto-toggle between full and split based on speakers |
 | `--split-trigger` | `diarization` | Trigger: `diarization` (audio) or `face` (visual count) |
 | `--diarization-speakers` | `auto` | Number of speakers or `auto` for visual detection |
-| `--camera-switch` | `False` | Enable camera-switch mode (cinematic speaker switching). Works with any vertical/square ratio (`9:16`, `1:1`, `3:4`, `4:5`) |
+| `--camera-switch` | `False` | Diarization-based camera switching (needs `HF_TOKEN`). Works with any vertical/square ratio |
 | `--switch-hold-duration` | `2.0` | Min seconds before switching speakers |
 | `--switch-blend-duration` | `0.0` | Transition duration when switching speakers (0 = instant snap, 0.2 = smooth blend) |
 | `--split-zoom` | `1.0` | Manual zoom factor for split panels |
@@ -164,17 +170,18 @@ Reels Uploader](Instagram-Reels-Uploader), and the
 | `--whisper-model` | `large-v3` | Faster-Whisper model size |
 | `--whisper-device` | `cuda` | Device: `cuda`, `cpu`, `auto` |
 | `--whisper-compute-type` | `float16` | Compute type: `float32`, `float16`, `int8` |
-| `--use-dlp-subs` | — | Use YouTube's built-in subtitles (skips Whisper if found) |
+| `--use-dlp-subs` | — | Use YouTube's subtitles in the spoken language (skips Whisper if found) |
 
 ---
 
-## Face Detection & Tracking
+## Face Detection & Framing
 
 | Argument | Default | Description |
 |---|---|---|
 | `--face-detector` | `mediapipe` | AI model: `mediapipe` (CPU) or `yolo` (GPU) |
 | `--yolo-size` | `8m` | YOLO model size: `8n`, `8s`, `8m`, `8n_v2`, `9c` |
-| `--box-face-detection` | `False` | Draw yellow bounding boxes (debug) |
+| `--layout` | `auto` | `auto` (crop, blur-fill faceless clips), `crop`, or `blur` |
+| `--no-speaker-tracking` | `False` | Follow faces by position instead of by who is talking |
 | `--static-crop` | `False` | Disable face tracking, use static center crop |
 
 ---
@@ -187,8 +194,8 @@ Reels Uploader](Instagram-Reels-Uploader), and the
 | `--track-deadzone` | `0.15` | Camera deadzone ratio |
 | `--track-smooth` | `0.30` | Camera catch-up speed factor |
 | `--track-jitter` | `5` | Pixel threshold to ignore micro-shakes |
-| `--track-snap` | `0.25` | Jump threshold for hard cut between speakers |
-| `--track-conf` | `0.55` | Face detection confidence threshold |
+| `--track-snap` | `0.08` | Jump threshold (fraction of frame width) for a hard cut |
+| `--track-conf` | `0.55` | Face detection confidence threshold (split-screen) |
 | `--track-smooth-window` | `12` | Frame window for layout stability (~0.5s) |
 | `--scene-cut-threshold` | `18` | Sensitivity for camera-cut detection |
 | `--track-iou-threshold` | `0.2` | Overlap threshold for merging duplicate detections |
@@ -205,17 +212,6 @@ Reels Uploader](Instagram-Reels-Uploader), and the
 | `--video-crf` | `20` | libx264 CRF quality (lower = sharper) |
 | `--video-preset` | `auto` | Encoder preset (NVENC: `p1`-`p7`, x264: `ultrafast`-`veryslow`) |
 | `--video-scale-algo` | `lanczos` | Resize algorithm: `lanczos`, `bicubic`, `bilinear`, `area` |
-
----
-
-## Developer / Debug Mode
-
-| Argument | Default | Description |
-|---|---|---|
-| `--dev-mode` | `False` | Enable 16:9 visualization for 9:16 tracking |
-| `--dev-mode-with-output` | `False` | Generate both final + dev dashboard simultaneously |
-| `--dev-mode-with-output-merge` | `False` | Merged side-by-side ultrawide output |
-| `--track-lines` | `False` | Draw crosshair tracking lines from face box |
 
 ---
 

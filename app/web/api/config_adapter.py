@@ -1,9 +1,10 @@
 """
 app.web.api.config_adapter — Bridge between the API JSON payload and the CLI config.
 
-Converts a ``JobCreateRequest`` (or raw dict) into the same ``SimpleNamespace``
-that ``clipping.config.build_config()`` produces, so the pipeline code runs
-unchanged.
+The web job starts from the CLI's own defaults (``build_parser`` with no
+arguments), applies the fields the request actually set, and builds the config
+through the same ``config_from_args`` as the command line. Nothing is
+duplicated here, so a new CLI option is available to the web API automatically.
 """
 
 from __future__ import annotations
@@ -11,33 +12,60 @@ from __future__ import annotations
 import os
 from types import SimpleNamespace
 
-# Reuse the CLI defaults so both entry points stay in sync.
-from ...clipping.config import (
-    ASS_ALIGN_169,
-    ASS_ALIGN_916,
-    ASS_FONT_169,
-    ASS_FONT_916,
-    ASS_MARGIN_169,
-    ASS_MARGIN_916,
-    BGM_BASE_VOLUME,
-    BGM_MODE,
-    BGM_MOODS,
-    BGM_DIR,
-    FONT_PRESETS,
-    GEMINI_FALLBACK_MODEL,
-    THUMBNAIL_FONT_NAME,
-    RENDER_OUTPUT_HEIGHT,
-    ACCENT_WORD_SCALE_169,
-    ACCENT_WORD_SCALE_916,
-    URL_FONT_THUMBNAIL,
-    URL_GLITCH_VIDEO,
-    URL_MEDIAPIPE_MODEL,
-    VIDEO_PRESET,
-    VIDEO_QUALITY_CQ,
-    VIDEO_QUALITY_CRF,
-    VIDEO_SCALE_ALGO,
-    ACCENT_WORD_COLOR,
-)
+from ...clipping.config import build_parser, config_from_args, validate_clip_durations
+
+
+def _negate(value):
+    return not bool(value)
+
+
+def _source_height(value):
+    if str(value).lower() == "max":
+        return "max"
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return "max"
+
+
+# JobCreateRequest field -> (argparse destination, transform)
+PAYLOAD_TO_ARGS = {
+    "url": ("url", None),
+    "source": ("source", None),
+    "clips": ("clips", int),
+    "ratio": ("ratio", None),
+    "min_duration": ("min_duration", float),
+    "max_duration": ("max_duration", float),
+    "source_height": ("source_height", _source_height),
+    "render_height": ("render_height", str),
+    "words_per_sub": ("words_per_sub", int),
+    "hook_duration": ("hook_duration", int),
+    "use_hook_glitch": ("hook_teaser", bool),  # pre-1.15 name
+    "hook_teaser": ("hook_teaser", bool),
+    "use_broll": ("no_broll", _negate),
+    "use_auto_bgm": ("no_bgm", _negate),
+    "use_karaoke_effect": ("no_karaoke", _negate),
+    "use_split_screen": ("split_screen", bool),
+    "use_camera_switch": ("camera_switch", bool),
+    "no_subs": ("no_subs", bool),
+    "no_segment_trim": ("no_segment_trim", bool),
+    "silence_trim": ("silence_trim", bool),
+    "font_style": ("font_style", None),
+    "caption_case": ("caption_case", None),
+    "title_overlay": ("no_title_overlay", _negate),
+    "layout": ("layout", None),
+    "speaker_tracking": ("no_speaker_tracking", _negate),
+    "language": ("language", None),
+    "caption_script": ("caption_script", None),
+    "whisper_model": ("whisper_model", None),
+    "whisper_device": ("whisper_device", None),
+    "whisper_compute_type": ("whisper_compute_type", None),
+    "use_dlp_subs": ("use_dlp_subs", bool),
+    "ai_provider": ("ai_provider", None),
+    "gemini_model": ("gemini_model", None),
+    "face_detector": ("face_detector", None),
+    "load_gemini_json": ("load_gemini_json", bool),
+}
 
 
 def build_config_from_payload(
@@ -47,187 +75,47 @@ def build_config_from_payload(
     env_overrides: dict | None = None,
 ) -> SimpleNamespace:
     """
-    Convert an API request payload into a ``SimpleNamespace`` config
-    compatible with the existing clipping pipeline.
+    Convert an API request payload into the pipeline config.
 
     Parameters
     ----------
     payload : dict
-        The job creation payload (from ``JobCreateRequest.model_dump()``).
+        The job creation payload (from ``JobCreateRequest.model_dump()``);
+        ``None`` values mean "use the CLI default".
     job_id : str
-        Unique job identifier — used for per-job output directory.
+        Unique job identifier — used for the per-job output directory.
     env_overrides : dict, optional
         Runtime overrides for API keys (e.g. from stored settings).
 
-    Returns
-    -------
-    SimpleNamespace
-        Fully populated config ready for ``run_pipeline(cfg)``.
+    Raises
+    ------
+    ValueError
+        When the requested clip length bounds are unusable.
     """
-    env = env_overrides or {}
-
     # Resolve the repository root (3 levels up from app/web/api).
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-    outputs_dir = os.path.abspath(os.path.join(base_dir, "outputs", job_id))
-    os.makedirs(outputs_dir, exist_ok=True)
-    font_dir = os.path.abspath(os.path.join(base_dir, "custom_fonts"))
-    os.makedirs(font_dir, exist_ok=True)
+    outputs_dir = os.path.join(base_dir, "outputs", job_id)
 
-    # Resolve source platform
-    source_platform = payload.get("source", "youtube")
+    args = build_parser().parse_args([])
+    for key, (dest, transform) in PAYLOAD_TO_ARGS.items():
+        value = payload.get(key)
+        if value is None:
+            continue
+        if hasattr(value, "value"):
+            value = value.value
+        setattr(args, dest, transform(value) if transform else value)
 
-    # Resolve face detector model
-    face_detector = payload.get("face_detector", "mediapipe")
-    yolo_size = payload.get("yolo_size", "8m")
+    error = validate_clip_durations(args.min_duration, args.max_duration)
+    if error:
+        raise ValueError(error)
 
-    # Resolve AI provider
-    ai_provider = payload.get("ai_provider", "gemini")
+    env = {**os.environ, **(env_overrides or {})}
+    cfg = config_from_args(args, base_dir=base_dir, outputs_dir=outputs_dir, env=env)
 
-    # Resolve render height
-    render_height = payload.get("render_height", str(RENDER_OUTPUT_HEIGHT))
-
-    # Resolve source height
-    source_height = payload.get("source_height", "max")
-    if source_height != "max":
-        try:
-            source_height = int(source_height)
-        except (ValueError, TypeError):
-            source_height = "max"
-
-    # Determine video input path
     upload_filename = payload.get("upload_filename")
     if upload_filename:
-        source_video_path = os.path.abspath(
-            os.path.join(base_dir, "uploads", upload_filename)
-        )
+        cfg.source_video_path = os.path.join(base_dir, "uploads", upload_filename)
     else:
-        source_video_path = os.path.abspath(
-            os.path.join(outputs_dir, "source_video.mp4")
-        )
-
-    cfg = SimpleNamespace(
-        # Paths
-        base_dir=base_dir,
-        outputs_dir=outputs_dir,
-        font_dir=font_dir,
-        source_video_path=source_video_path,
-        file_font_thumbnail=os.path.abspath(
-            os.path.join(base_dir, THUMBNAIL_FONT_NAME)
-        ),
-        file_mediapipe_model=os.path.abspath(
-            os.path.join(base_dir, "blaze_face_full_range.tflite")
-        ),
-        # YOLO configs
-        face_detector=face_detector,
-        yolo_size=yolo_size,
-        url_yolo_model=f"https://huggingface.co/Bingsu/adetailer/resolve/main/face_yolov{yolo_size}.pt",
-        file_yolo_model=os.path.abspath(
-            os.path.join(base_dir, f"face_yolov{yolo_size}.pt")
-        ),
-        # API keys — prefer env_overrides, then os.environ
-        api_key_gemini=env.get("GOOGLE_API_KEY", os.environ.get("GOOGLE_API_KEY", "")),
-        hf_token=env.get("HF_TOKEN", os.environ.get("HF_TOKEN", "")),
-        pexels_api_key=env.get("PEXELS_API_KEY", os.environ.get("PEXELS_API_KEY", "")),
-        # Main settings
-        source_platform=source_platform,
-        url_youtube=payload.get("url"),
-        clip_count=payload.get("clips", 7),
-        aspect_ratio=payload.get("ratio", "9:16"),
-        download_source_height=source_height,
-        render_output_height=render_height,
-        # Content & hook
-        max_words_per_subtitle=payload.get("words_per_sub", 5),
-        hook_duration=payload.get("hook_duration", 3),
-        hook_source=None,
-        hook_source_start=0.0,
-        # Hook V2 & Segment Trimming
-        hook_v2=payload.get("hook_v2", False),
-        hook_v2_items=payload.get("hook_v2_items", 3),
-        hook_v2_style=payload.get("hook_v2_style", "controversial_fast_glitch"),
-        white_flash_duration=payload.get("white_flash_duration", 0.12),
-        no_segment_trim=payload.get("no_segment_trim", False),
-        silence_trim=payload.get("silence_trim", False),
-        use_broll=payload.get("use_broll", True),
-        use_hook_glitch=payload.get("use_hook_glitch", True),
-        use_auto_bgm=payload.get("use_auto_bgm", True),
-        use_karaoke_effect=payload.get("use_karaoke_effect", True),
-        use_split_screen=payload.get("use_split_screen", False),
-        use_dynamic_split=payload.get("use_dynamic_split", False),
-        split_trigger=payload.get("split_trigger", "diarization"),
-        use_camera_switch=payload.get("use_camera_switch", False),
-        diarization_num_speakers=payload.get("diarization_speakers", "auto"),
-        switch_hold_duration=payload.get("switch_hold_duration", 2.0),
-        switch_blend_duration=payload.get("switch_blend_duration", 0.0),
-        split_zoom=payload.get("split_zoom", 1.0),
-        split_v_align=payload.get("split_v_align", 0.5),
-        split_auto_zoom=payload.get("split_auto_zoom", False),
-        split_max_zoom=payload.get("split_max_zoom", 2.5),
-        # Subtitles & typography
-        no_subs=payload.get("no_subs", False),
-        active_font_style=payload.get("font_style", "HORMOZI"),
-        font_presets=FONT_PRESETS,
-        use_advanced_text=payload.get("advanced_text", False),
-        use_advanced_text_on_hook=payload.get("advanced_text_hook", False),
-        # ASS position values
-        ass_align_916=ASS_ALIGN_916,
-        ass_margin_916=ASS_MARGIN_916,
-        ass_font_916=ASS_FONT_916,
-        accent_word_scale_916=ACCENT_WORD_SCALE_916,
-        ass_align_169=ASS_ALIGN_169,
-        ass_margin_169=ASS_MARGIN_169,
-        ass_font_169=ASS_FONT_169,
-        accent_word_scale_169=ACCENT_WORD_SCALE_169,
-        accent_word_color=ACCENT_WORD_COLOR,
-        # Asset URLs
-        url_font_thumbnail=URL_FONT_THUMBNAIL,
-        url_glitch_video=URL_GLITCH_VIDEO,
-        url_mediapipe_model=URL_MEDIAPIPE_MODEL,
-        # BGM
-        bgm_base_volume=BGM_BASE_VOLUME,
-        bgm_mode=BGM_MODE,
-        bgm_moods=BGM_MOODS,
-        bgm_dir=BGM_DIR,
-        # Whisper
-        use_dlp_subs=payload.get("use_dlp_subs", False),
-        whisper_model=payload.get("whisper_model", "large-v3"),
-        whisper_device=payload.get("whisper_device", "cuda"),
-        whisper_compute_type=payload.get("whisper_compute_type", "float16"),
-        # AI
-        ai_provider=ai_provider,
-        api_key_nvidia=env.get("NVIDIA_API_KEY", os.environ.get("NVIDIA_API_KEY", "")),
-        nvidia_model=payload.get("nvidia_model", "deepseek-ai/deepseek-v4-pro"),
-        gemini_model=payload.get("gemini_model", "gemini-3-flash-preview"),
-        gemini_fallback_model=payload.get("gemini_fallback_model", GEMINI_FALLBACK_MODEL),
-        # Tri-state on the API model (None = unspecified); the pipeline wants a bool.
-        load_gemini_json=bool(payload.get("load_gemini_json")),
-        # Tracking Tuning (use defaults for web GUI)
-        track_step=None,
-        track_deadzone=None,
-        track_smooth=None,
-        track_jitter=None,
-        track_snap=None,
-        track_conf=0.55,
-        track_smooth_window=12,
-        scene_cut_threshold=18,
-        track_iou_threshold=0.2,
-        video_quality_cq=payload.get("video_cq", VIDEO_QUALITY_CQ),
-        video_quality_crf=payload.get("video_crf", VIDEO_QUALITY_CRF),
-        video_bitrate=payload.get("video_bitrate", "auto"),
-        video_sharpen=payload.get("video_sharpen", False),
-        video_preset=payload.get("video_preset", VIDEO_PRESET),
-        video_scale_algo=payload.get("video_scale_algo", VIDEO_SCALE_ALGO),
-        box_face_detection=False,
-        dev_mode=False,
-        dev_mode_with_output=False,
-        dev_mode_with_output_merge=False,
-        track_lines=False,
-        static_crop=payload.get("static_crop", False),
-        # Story Clip Mode (not supported via web yet)
-        story_mode=False,
-        story_recipe_path=None,
-        sources_json_path=None,
-        story_output_dir=None,
-        skip_download=False,
-    )
+        cfg.source_video_path = os.path.join(outputs_dir, "source_video.mp4")
 
     return cfg

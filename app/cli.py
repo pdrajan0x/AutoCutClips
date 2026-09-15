@@ -8,11 +8,15 @@ Clip / story mode (the default — flags are parsed by clipping.config):
     python -m app.cli --story-mode --story-recipe story_recipe.json
     python -m app.cli --help
 
+Video queue (one URL per line in a text file; clip flags apply to every video):
+    python -m app.cli queue --links links.txt [--retry-failed] --clips 5 --ratio 9:16
+
 Publishing and maintenance subcommands:
     python -m app.cli upload-youtube        [--test-mode ...]
     python -m app.cli upload-instagram      [--test-mode ...]
     python -m app.cli reschedule-youtube    [--apply ...]
     python -m app.cli youtube-token         generate | verify
+    python -m app.cli learn-youtube         [--output ...]
 
 Each subcommand is also installed as its own console script — see
 [project.scripts] in pyproject.toml.
@@ -84,10 +88,11 @@ def _print_clip_summary(cfg) -> None:
         ("URL", cfg.url_youtube),
         ("Clips", cfg.clip_count),
         ("Ratio", cfg.aspect_ratio),
+        ("Clip Length", f"{cfg.min_clip_duration:g}-{cfg.max_clip_duration:g}s"),
         ("Font Style", cfg.active_font_style),
         ("Subtitles", _on_off(not cfg.no_subs)),
         ("B-Roll", _on_off(cfg.use_broll)),
-        ("Hook Glitch", _on_off(cfg.use_hook_glitch)),
+        ("Hook Teaser", _on_off(getattr(cfg, "hook_teaser", False))),
         ("BGM", _on_off(cfg.use_auto_bgm)),
         ("Karaoke", _on_off(cfg.use_karaoke_effect)),
         ("Split-Screen", _on_off(cfg.use_split_screen)),
@@ -100,6 +105,8 @@ def _print_clip_summary(cfg) -> None:
         ]
     rows += [
         ("Whisper", f"{cfg.whisper_model} ({cfg.whisper_device})"),
+        ("Language", f"{getattr(cfg, 'whisper_language', 'auto')} — captions in "
+                     f"{'original script' if getattr(cfg, 'caption_script', 'latin') == 'native' else 'English letters'}"),
         ("Gemini", cfg.gemini_model),
     ]
     if getattr(cfg, "watermark_enabled", False):
@@ -362,6 +369,103 @@ def youtube_token(argv: list[str] | None = None) -> None:
     _main(argv)
 
 
+def _learn_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="clipping-learn-youtube",
+        description="📈 AutoCutClips — fetch views for uploaded clips, so clip selection "
+        "learns what works on your channel",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    p.add_argument("--token-file", default=".credentials/youtube_token.json",
+                   help="Path to the YouTube OAuth token (JSON)")
+    p.add_argument("--history-file", default=None,
+                   help="Upload history written by upload-youtube "
+                        "(default: upload_log_file from the safety config)")
+    p.add_argument("--safety-config", default="upload_safety.json",
+                   help="Safety config that names the upload history file")
+    p.add_argument("--output", default="outputs/channel_performance.json",
+                   help="Where to save the results; clip runs read this path by default")
+    return p
+
+
+def learn_youtube(argv: list[str] | None = None) -> None:
+    """Fetch statistics for uploaded clips into channel_performance.json."""
+    from .uploaders.performance import refresh_channel_performance
+
+    args = _learn_parser().parse_args(sys.argv[1:] if argv is None else argv)
+
+    if not os.path.exists(args.token_file):
+        print(f"❌ ERROR: credentials file not found at '{args.token_file}'.")
+        print("   Generate it with: python -m app.cli youtube-token generate")
+        sys.exit(1)
+
+    history_file = args.history_file
+    if not history_file:
+        from .uploaders.youtube_safety import load_safety_config
+
+        history_file = load_safety_config(args.safety_config)["upload_log_file"]
+
+    _banner("📈 Channel results")
+    refresh_channel_performance(args.token_file, history_file, args.output)
+
+
+def _queue_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="clipping queue",
+        description="📋 AutoCutClips — clip a list of videos one after another. "
+        "Any other flag (--clips, --ratio, --cookies, ...) is passed to every video's clip run.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    p.add_argument("--links", required=True,
+                   help="Text file with one video URL per line (# comments allowed)")
+    p.add_argument("--retry-failed", action="store_true",
+                   help="Re-run videos that failed last time (finished videos are always skipped)")
+    p.add_argument("--keep-source", action="store_true",
+                   help="Keep each downloaded source video instead of deleting it after rendering")
+    return p
+
+
+def queue(argv: list[str] | None = None) -> None:
+    """Run the clip pipeline over every URL in a links file."""
+    from .clipping.queue_runner import read_links, run_queue
+
+    args, clip_argv = _queue_parser().parse_known_args(
+        sys.argv[1:] if argv is None else argv
+    )
+
+    if "--url" in clip_argv or "-u" in clip_argv:
+        print("❌ ERROR: put the URLs in the --links file instead of passing --url.")
+        sys.exit(1)
+
+    if not os.path.exists(args.links):
+        print(f"❌ ERROR: links file not found: {args.links}")
+        sys.exit(1)
+
+    links = read_links(args.links)
+    if not links:
+        print(f"❌ ERROR: no http(s) URLs found in {args.links}")
+        sys.exit(1)
+
+    from .clipping.config import build_config
+
+    # Validate the shared flags once, up front, instead of failing on video 1.
+    cfg = build_config(["--url", links[0], *clip_argv])
+    if not cfg.api_key_gemini and not getattr(cfg, "load_gemini_json", False):
+        print("❌ ERROR: the GOOGLE_API_KEY environment variable is not set.")
+        sys.exit(1)
+
+    _print_clip_summary(cfg)
+    for warning in _preflight_warnings(cfg):
+        print(f"\n⚠️  {warning}")
+
+    run_queue(
+        links,
+        clip_argv,
+        retry_failed=args.retry_failed,
+        keep_source=args.keep_source,
+    )
+
+
 def story(argv: list[str] | None = None) -> None:
     """Run the clip pipeline in Story Clip mode (implies --story-mode)."""
     argv = list(argv) if argv is not None else []
@@ -373,9 +477,11 @@ def story(argv: list[str] | None = None) -> None:
 SUBCOMMANDS = {
     "clip": clip,
     "story": story,
+    "queue": queue,
     "upload-youtube": upload_youtube,
     "upload-instagram": upload_instagram,
     "reschedule-youtube": reschedule_youtube,
+    "learn-youtube": learn_youtube,
     "youtube-token": youtube_token,
 }
 

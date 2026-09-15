@@ -78,13 +78,16 @@ def estimate_speaker_count_from_video(video_path: str, cfg) -> int:
 
         logging.getLogger("ultralytics").setLevel(logging.ERROR)
         try:
-            model_name = f"yolov{cfg.yolo_size}-face.pt"
-            yolo_model = YOLO(model_name)
+            # Same weights the renderers use. The old "yolov8m-face.pt" name
+            # does not exist, so this always failed and — because it mutated
+            # cfg — silently switched the whole run to MediaPipe.
+            if not os.path.exists(cfg.file_yolo_model):
+                urllib.request.urlretrieve(cfg.url_yolo_model, cfg.file_yolo_model)
+            yolo_model = YOLO(cfg.file_yolo_model)
         except Exception as e:
-            print(f"⚠️ YOLO face detection failed: {e}. Falling back to MediaPipe.")
-            cfg.face_detector = "mediapipe"
+            print(f"⚠️ YOLO face detection failed: {e}. Using MediaPipe for the speaker count.")
 
-    if cfg.face_detector != "yolo":
+    if yolo_model is None:
         detector = get_face_detector(cfg)
 
     cap = cv2.VideoCapture(video_path)
@@ -112,7 +115,7 @@ def estimate_speaker_count_from_video(video_path: str, cfg) -> int:
 
         faces_in_frame = 0
 
-        if cfg.face_detector == "yolo" and yolo_model:
+        if yolo_model is not None:
             results = yolo_model(frame, verbose=False)
             if results and len(results[0].boxes) > 0:
                 faces_in_frame = len(results[0].boxes)

@@ -66,7 +66,7 @@ That's it! The pipeline will:
 1. Download the video
 2. Transcribe it with Whisper
 3. Analyze it with Gemini AI
-4. Generate highlight clips with subtitles, thumbnails, and metadata
+4. Generate clips with captions and upload-ready metadata (thumbnails for landscape ratios)
 
 ---
 
@@ -79,11 +79,11 @@ outputs/
 └── <video_hash>/
     ├── highlight_rank_1_ready.mp4    # Final rendered clip (Rank 1)
     ├── highlight_rank_2_ready.mp4    # Final rendered clip (Rank 2)
-    ├── thumbnail_rank_1.jpg          # Auto-generated thumbnail
-    ├── thumbnail_rank_2.jpg
+    ├── thumbnail_rank_1.jpg          # Thumbnail (16:9 output only)
     ├── render_manifest.json          # Manifest with metadata for all clips
     ├── metadata_preview.json         # Gemini-generated metadata
-    ├── gemini_response.json          # Raw AI response (for debugging)
+    ├── gemini_response.json          # Raw AI response (reuse with --load-gemini-json)
+    ├── transcript_cache.json         # Saved transcript, reused on a re-run
     └── video_asli.mp4                # Downloaded source video
 ```
 

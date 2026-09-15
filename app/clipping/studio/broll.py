@@ -79,7 +79,9 @@ def download_pexels_broll(query, ratio, output_filename, pexels_api_key):
         print(f"   🔄 The B-roll pool for '{query}' is exhausted, resetting it.")
         available_videos = data["videos"]
 
-    video_data = random.choice(available_videos)
+    # Pexels returns results by relevance; picking at random from all 30 made
+    # the footage only loosely related to what the speaker is saying.
+    video_data = random.choice(available_videos[:3])
     USED_PEXELS_IDS.add(video_data["id"])
 
     video_files = [
@@ -116,6 +118,42 @@ def download_pexels_broll(query, ratio, output_filename, pexels_api_key):
     except Exception as e:
         print(f"   ⚠️ Error while downloading the B-roll for '{query}': {e}")
         return False
+
+
+def open_broll_captures(broll_data):
+    """Open every downloaded B-roll insert for sequential reading during a render."""
+    captures = []
+    for br in broll_data or []:
+        if "filepath" in br and os.path.exists(br["filepath"]):
+            cap = cv2.VideoCapture(br["filepath"])
+            captures.append({
+                "start": br["start_time"],
+                "end": br["end_time"],
+                "cap": cap,
+                "fps": cap.get(cv2.CAP_PROP_FPS) or 30.0,
+                "next_index": 0,
+                "frame": None,
+            })
+    return captures
+
+
+def read_broll_frame(capture, elapsed):
+    """
+    The B-roll frame for *elapsed* seconds into the insert.
+
+    Reads forward instead of seeking on every output frame: each seek decoded
+    from the previous keyframe, so inserts stuttered and rendered slowly. A clip
+    shorter than its slot holds its last frame.
+    """
+    target_index = int(elapsed * capture["fps"])
+    while capture["next_index"] <= target_index:
+        ok, frame = capture["cap"].read()
+        if not ok:
+            capture["next_index"] = target_index + 1
+            break
+        capture["frame"] = frame
+        capture["next_index"] += 1
+    return capture["frame"]
 
 
 def crop_center_broll(img, target_w, target_h):

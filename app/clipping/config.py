@@ -1,12 +1,16 @@
 """
 clipping.config — Master configuration.
 
-Holds every default value and builds the runtime config from the CLI arguments.
+Holds every default value, the CLI parser, and ``config_from_args`` — the one
+place that turns parsed options into the runtime config. The web API builds its
+config through the same function, so a new option only has to be added here.
 """
 
 import argparse
 import os
 from types import SimpleNamespace
+
+from .engine.prompt import MAX_CLIP_DURATION, MIN_CLIP_DURATION
 
 try:
     from dotenv import load_dotenv
@@ -27,10 +31,14 @@ CLIP_COUNT = 7
 ASPECT_RATIO = "9:16"
 
 # 2. CONTENT & HOOK SETTINGS
-MAX_WORDS_PER_SUBTITLE = 5
+# 2-4 words per caption is what fast-reading short-form captions use; 5 words
+# forced viewers to read ahead of the speaker.
+MAX_WORDS_PER_SUBTITLE = 3
 HOOK_DURATION = 3
 USE_BROLL = True
-USE_HOOK_GLITCH = True
+# Off by default: clips open directly on their strongest line. The teaser
+# (flash-forward to the peak line, then a clean cut to the clip) is opt-in.
+HOOK_TEASER = False
 USE_SPLIT_SCREEN = False
 USE_CAMERA_SWITCH = False
 DIARIZATION_NUM_SPEAKERS = "auto"
@@ -41,11 +49,10 @@ SWITCH_BLEND_DURATION = 0.0  # 0 = instant snap, >0 = smooth blend in seconds
 SOURCE_PLATFORM = "youtube"
 
 # 3. SUBTITLE & TYPOGRAPHY SETTINGS (ASS STYLE)
-USE_ADVANCED_TEXT = False
-USE_ADVANCED_TEXT_ON_HOOK = False
+USE_ADVANCED_TEXT = True  # kinetic captions; --simple-captions turns them off
 USE_KARAOKE_EFFECT = True
 
-ACTIVE_FONT_STYLE = "HORMOZI"
+ACTIVE_FONT_STYLE = "DEFAULT"  # Montserrat Black — the heaviest, most readable preset
 
 FONT_PRESETS = {
     "DEFAULT": {
@@ -110,16 +117,16 @@ FONT_PRESETS = {
 ASS_ALIGN_916 = 2
 ASS_MARGIN_916 = 450
 ASS_FONT_916 = 90
-ACCENT_WORD_SCALE_916 = ASS_FONT_916 + 120
+ACCENT_WORD_SCALE_916 = 150  # percent size of the AI's most important keywords
 
 # 16:9 (horizontal) only
 ASS_ALIGN_169 = 2
 ASS_MARGIN_169 = 70
 ASS_FONT_169 = 80
-ACCENT_WORD_SCALE_169 = ASS_FONT_169 + 120
+ACCENT_WORD_SCALE_169 = 150
 
-# Accent word colour (ASS format is BGR: &H[Blue][Green][Red]&)
-ACCENT_WORD_COLOR = "&HFFFFFF&"
+# Keyword / spoken-word highlight colour (ASS format is BGR: &H[Blue][Green][Red]&) — gold
+ACCENT_WORD_COLOR = "&H00D7FF&"
 
 # 4. EXTERNAL ASSET SETTINGS
 THUMBNAIL_FONT_NAME = "Montserrat-Black.ttf"
@@ -127,12 +134,11 @@ URL_FONT_THUMBNAIL = (
     "https://github.com/JulietaUla/Montserrat/raw/master/fonts/ttf/Montserrat-Black.ttf"
 )
 
-URL_GLITCH_VIDEO = "https://www.youtube.com/watch?v=5nBcNRYmjs0"
 URL_MEDIAPIPE_MODEL = "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_full_range/float16/latest/blaze_face_full_range.tflite"
 
 # 5. AUTO-BGM & AUDIO DUCKING SETTINGS
 USE_AUTO_BGM = True
-BGM_BASE_VOLUME = 0.25
+BGM_BASE_VOLUME = 0.12  # music should sit under the voice, not compete with it
 BGM_MODE = "ducking"  # 'ducking' = sidechain compress, 'background' = constant volume mix
 
 # Supported moods (these match the folder names under assets/bgm/)
@@ -155,6 +161,10 @@ AI_PROVIDER = "gemini"
 NVIDIA_MODEL = "deepseek-ai/deepseek-v4-pro"
 GEMINI_MODEL = "gemini-3-flash-preview"
 GEMINI_FALLBACK_MODEL = "gemini-2.5-flash"
+
+# YouTube Shorts accept up to 3 minutes.
+MAX_ALLOWED_CLIP_DURATION = 180
+MIN_ALLOWED_CLIP_DURATION = 5
 
 
 # ==============================================================================
@@ -179,7 +189,7 @@ def _parse_download_height(val: str) -> str | int:
     - `max` to always prefer the highest available quality.
     - positive integers like 1080, 1440, 2160 to cap source resolution.
     """
-    if val.lower() == "max":
+    if str(val).lower() == "max":
         return "max"
     try:
         parsed = int(val)
@@ -191,7 +201,8 @@ def _parse_download_height(val: str) -> str | int:
         raise argparse.ArgumentTypeError("Download source height must be a positive integer.")
     return parsed
 
-def _build_parser() -> argparse.ArgumentParser:
+
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="🎬 AutoCutClips — AI Auto-Clipper & Teaser Generator",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -207,6 +218,12 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["youtube", "tiktok", "instagram", "gdrive"],
         default=SOURCE_PLATFORM,
         help="Video source platform. Determines download behavior and subtitle availability.",
+    )
+    p.add_argument(
+        "--cookies",
+        default=None,
+        help="Netscape-format cookies.txt for yt-dlp (fixes YouTube's 'Sign in to confirm "
+        "you're not a bot' on Colab/Kaggle). Also read from $YTDLP_COOKIES_FILE.",
     )
     p.add_argument(
         "--tiktok",
@@ -229,6 +246,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Output aspect ratio",
     )
     p.add_argument(
+        "--min-duration",
+        type=float,
+        default=MIN_CLIP_DURATION,
+        help="Shortest clip length in seconds. Many strong moments are 15-30s.",
+    )
+    p.add_argument(
+        "--max-duration",
+        type=float,
+        default=MAX_CLIP_DURATION,
+        help="Longest clip length in seconds (YouTube Shorts allow up to 180).",
+    )
+    p.add_argument(
         "--source-height",
         type=_parse_download_height,
         default=DOWNLOAD_SOURCE_HEIGHT,
@@ -245,7 +274,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--words-per-sub",
         type=int,
         default=MAX_WORDS_PER_SUBTITLE,
-        help="Max words per karaoke subtitle group",
+        help="Max words per caption group",
     )
     p.add_argument(
         "--hook-duration",
@@ -254,9 +283,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Hook teaser duration in seconds",
     )
     p.add_argument(
+        "--hook-teaser",
+        action="store_true",
+        default=HOOK_TEASER,
+        help="Open each clip with a short flash-forward to its peak line, then cut to the clip. "
+        "Off by default: clips open directly on their strongest line.",
+    )
+    p.add_argument("--no-hook", action="store_true", help=argparse.SUPPRESS)  # pre-1.15 flag; teaser is now off by default
+    p.add_argument(
         "--hook-source",
         default=None,
-        help="Google Drive URL or local path for a single custom hook video (.mp4)",
+        help="Google Drive URL or local path for a single custom hook video (.mp4); played as the teaser",
     )
     p.add_argument(
         "--hook-source-start",
@@ -265,7 +302,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Start time in seconds for the custom hook video",
     )
     p.add_argument("--no-broll", action="store_true", help="Disable B-roll footage")
-    p.add_argument("--no-hook", action="store_true", help="Disable hook glitch teaser")
     p.add_argument("--no-bgm", action="store_true", help="Disable background music")
     p.add_argument(
         "--bgm-mode",
@@ -274,9 +310,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="BGM mixing mode: 'ducking' (sidechain compress — BGM auto-lowers during speech) or 'background' (constant low volume mix)",
     )
     p.add_argument(
+        "--bgm-dir",
+        default=None,
+        help="Folder of your own music with chill/ epic/ sad/ upbeat/ suspense/ subfolders "
+        "(default: assets/bgm). Handy for a Google Drive music folder on Colab.",
+    )
+    p.add_argument(
+        "--bgm-volume",
+        type=float,
+        default=BGM_BASE_VOLUME,
+        help="Background music volume before ducking (0.05 = barely there, 0.25 = prominent).",
+    )
+    p.add_argument(
         "--no-karaoke",
         action="store_true",
-        help="Disable karaoke highlight effect (use clean text instead)",
+        help="Disable the spoken-word highlight (show the caption group without a moving highlight)",
     )
     p.add_argument(
         "--split-screen",
@@ -326,7 +374,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="The trigger used to decide when to split the screen. 'diarization' uses audio (who is talking), 'face' uses video (how many faces are visible).",
     )
 
-
     # --- Split Screen Optimizations ---
     p.add_argument(
         "--split-zoom",
@@ -352,7 +399,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Maximum zoom factor allowed for auto-zoom (default: 2.5).",
     )
 
-
     # --- Subtitles & typography ---
     p.add_argument(
         "--font-style",
@@ -361,16 +407,24 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Font style preset",
     )
     p.add_argument(
-        "--advanced-text",
-        action="store_true",
-        default=USE_ADVANCED_TEXT,
-        help="Enable advanced kinetic typography",
+        "--caption-case",
+        choices=["normal", "upper"],
+        default="normal",
+        help="Write captions as spoken ('normal') or in UPPERCASE ('upper').",
     )
     p.add_argument(
-        "--advanced-text-hook",
+        "--simple-captions",
         action="store_true",
-        default=USE_ADVANCED_TEXT_ON_HOOK,
-        help="Enable advanced typography on hook",
+        help="Use the plain one-line karaoke captions instead of the default kinetic style "
+        "(per-word pop, gold highlight, larger keywords).",
+    )
+    p.add_argument("--advanced-text", action="store_true", help=argparse.SUPPRESS)  # now the default
+    p.add_argument("--advanced-text-hook", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument(
+        "--no-title-overlay",
+        action="store_true",
+        help="Disable the AI headline boxed at the top of the frame for the first seconds "
+        "(it keeps sound-off viewers from swiping away).",
     )
 
     # --- Whisper ---
@@ -381,6 +435,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--whisper-model", default=WHISPER_MODEL, help="Faster-Whisper model size"
+    )
+    p.add_argument(
+        "--language",
+        default="auto",
+        help="Spoken language code for transcription (hi, en, ta, es, ...). 'auto' uses the language "
+        "YouTube reports, then Whisper's detection. Speech is never translated.",
+    )
+    p.add_argument(
+        "--caption-script",
+        choices=["latin", "native"],
+        default="latin",
+        help="'latin': speech in a non-Latin script (Hindi, Tamil, Arabic, ...) keeps its language but is "
+        "written in English letters, e.g. 'namaste, mera naam ... hai'. 'native': keep the original "
+        "script (needs a caption font that supports it).",
     )
     p.add_argument(
         "--whisper-device",
@@ -394,7 +462,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Compute type for Whisper (float16, int8, etc.)",
     )
 
-    # --- Gemini & Face Detection ---
+    # --- AI & face detection ---
     p.add_argument(
         "--face-detector",
         choices=["mediapipe", "yolo"],
@@ -442,29 +510,30 @@ def _build_parser() -> argparse.ArgumentParser:
         "effort on clip selection and metadata only.",
     )
     p.add_argument(
-        "--box-face-detection",
-        action="store_true",
-        help="Draw a yellow bounding box around the detected face for debugging/tracking visualization",
+        "--performance-file",
+        default=None,
+        help="Channel results written by `learn-youtube` (default: outputs/channel_performance.json). "
+        "When it holds enough published clips, the AI is shown the best and weakest performers.",
     )
     p.add_argument(
-        "--dev-mode",
+        "--no-channel-learning",
         action="store_true",
-        help="Enable developer visualization mode for 9:16 tracking (shows stabilization box and dimmed background)",
+        help="Do not show the AI how earlier clips performed on the channel.",
+    )
+
+    # --- Framing ---
+    p.add_argument(
+        "--layout",
+        choices=["auto", "crop", "blur"],
+        default="auto",
+        help="Vertical framing: 'auto' crops to the face, but fits the whole frame over a blurred "
+        "background when the clip has few faces (slides, screen recordings); 'crop' always crops; "
+        "'blur' always fits the whole frame.",
     )
     p.add_argument(
-        "--dev-mode-with-output",
+        "--no-speaker-tracking",
         action="store_true",
-        help="Render BOTH the Dev Mode visualization AND the standard output video simultaneously.",
-    )
-    p.add_argument(
-        "--dev-mode-with-output-merge",
-        action="store_true",
-        help="Render a merged side-by-side video of both Dev Mode and standard output.",
-    )
-    p.add_argument(
-        "--track-lines",
-        action="store_true",
-        help="Draw crosshair tracking lines extending from the face box to the boundaries",
+        help="With several people in frame, follow faces by position instead of by who is talking.",
     )
     p.add_argument(
         "--static-crop",
@@ -501,7 +570,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--track-snap",
         type=float,
         default=None,
-        help="Face jump snap threshold (default: 0.25)",
+        help="Face jump snap threshold (default: 0.08 for the standard renderer)",
     )
     p.add_argument(
         "--track-conf",
@@ -558,41 +627,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "--video-scale-algo",
         choices=["lanczos", "bicubic", "bilinear", "area"],
         default=VIDEO_SCALE_ALGO,
-        help="Resize algorithm for OpenCV scaling steps during rendering.",
+        help="Resize algorithm used when scaling frames during rendering.",
     )
 
-    # --- Hook V2 & Segment Trimming ---
-    hook_v2_group = p.add_argument_group("Hook V2 & Segment Trimming")
-    hook_v2_group.add_argument(
-        "--hook-v2",
-        action="store_true",
-        default=False,
-        help="Enable Multi-Hook Intro V2 mode (3-4 micro-hook clips with flash/glitch transitions).",
-    )
-    hook_v2_group.add_argument(
-        "--hook-v2-items",
-        type=int,
-        default=3,
-        help="Number of micro-hooks to generate in V2 mode.",
-    )
-    hook_v2_group.add_argument(
-        "--hook-v2-style",
-        default="controversial_fast_glitch",
-        help="Style prompt hint for AI to pick the hook style.",
-    )
-    hook_v2_group.add_argument(
-        "--white-flash-duration",
-        type=float,
-        default=0.12,
-        help="Duration of white flash transition between hooks (seconds).",
-    )
-    hook_v2_group.add_argument(
+    # --- Segment Trimming ---
+    trim_group = p.add_argument_group("Segment Trimming")
+    trim_group.add_argument(
         "--no-segment-trim",
         action="store_true",
         default=False,
         help="Disable AI segment trimming (render full start-to-end instead of keep_segments).",
     )
-    hook_v2_group.add_argument(
+    trim_group.add_argument(
         "--silence-trim",
         action="store_true",
         default=False,
@@ -672,24 +718,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=0.15,
         help="Volume of the original video audio when voice-over is active.",
     )
-    vo_group.add_argument(
-        "--edge-glow",
-        action="store_true",
-        default=False,
-        help="Enable ambient edge glow effect on the entire clip (hook, clip, broll, voiceover). Without this flag, glow only appears on voice-over intro.",
-    )
-    vo_group.add_argument(
-        "--edge-glow-mode",
-        choices=["default", "smooth", "full"],
-        default="smooth",
-        help=(
-            "Edge glow rendering strategy. "
-            "'default': 10s loop (original, may stutter at loop point). "
-            "'smooth': 10s loop with auto-adjusted speed for seamless looping. "
-            "'full': render glow for the full video duration (no loop needed, "
-            "heavier but zero stutter)."
-        ),
-    )
 
     # --- Watermark ---
     wm_group = p.add_argument_group("Watermark")
@@ -747,16 +775,28 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def build_config(argv: list[str] | None = None) -> SimpleNamespace:
-    """Parse CLI args and merge with defaults into a config namespace."""
-    parser = _build_parser()
-    args = parser.parse_args(argv)
+# Kept for callers that imported the old private name.
+_build_parser = build_parser
 
-    # Validate: --url is required unless --story-mode is used
+
+def validate_clip_durations(min_duration: float, max_duration: float) -> str | None:
+    """Return an error message when the clip length bounds are unusable, else None."""
+    if not (MIN_ALLOWED_CLIP_DURATION <= min_duration < max_duration <= MAX_ALLOWED_CLIP_DURATION):
+        return (
+            f"clip length must satisfy {MIN_ALLOWED_CLIP_DURATION} <= --min-duration < --max-duration "
+            f"<= {MAX_ALLOWED_CLIP_DURATION} (got {min_duration:g} and {max_duration:g})."
+        )
+    return None
+
+
+def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     if not args.story_mode and not args.url:
         parser.error("--url is required unless --story-mode is used.")
 
-    # Validate watermark args
+    error = validate_clip_durations(args.min_duration, args.max_duration)
+    if error:
+        parser.error(error)
+
     if args.watermark:
         if not args.text and not args.image:
             parser.error("--watermark requires either --text or --image.")
@@ -778,56 +818,70 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
                     f"Supported formats: {', '.join(valid_exts)}"
                 )
 
-    base_dir = os.getcwd()
-    outputs_dir = os.path.abspath(os.path.join(base_dir, "outputs"))
+
+def config_from_args(
+    args: argparse.Namespace,
+    *,
+    base_dir: str | None = None,
+    outputs_dir: str | None = None,
+    env=None,
+) -> SimpleNamespace:
+    """
+    Build the runtime config from parsed options.
+
+    Shared by the CLI (``build_config``) and the web API (which parses no
+    arguments and then overrides the fields a job sets), so both always carry
+    the same fields with the same defaults.
+    """
+    env = os.environ if env is None else env
+    base_dir = os.path.abspath(base_dir or os.getcwd())
+    base_outputs = os.path.join(base_dir, "outputs")
+    outputs_dir = os.path.abspath(outputs_dir or base_outputs)
     os.makedirs(outputs_dir, exist_ok=True)
-    font_dir = os.path.abspath(os.path.join(base_dir, "custom_fonts"))
+    font_dir = os.path.join(base_dir, "custom_fonts")
     os.makedirs(font_dir, exist_ok=True)
 
-    cfg = SimpleNamespace(
+    def path_in_base(name):
+        return os.path.join(base_dir, name)
+
+    return SimpleNamespace(
         # Paths
         base_dir=base_dir,
         outputs_dir=outputs_dir,
         font_dir=font_dir,
-        source_video_path=os.path.abspath(os.path.join(base_dir, "source_video.mp4")),
-        file_font_thumbnail=os.path.abspath(
-            os.path.join(base_dir, THUMBNAIL_FONT_NAME)
-        ),
-        file_mediapipe_model=os.path.abspath(
-            os.path.join(base_dir, "blaze_face_full_range.tflite")
-        ),
+        source_video_path=path_in_base("source_video.mp4"),
+        file_font_thumbnail=path_in_base(THUMBNAIL_FONT_NAME),
+        file_mediapipe_model=path_in_base("blaze_face_full_range.tflite"),
+        file_face_landmarker=path_in_base("face_landmarker.task"),
         # YOLO configs
         face_detector=args.face_detector,
         yolo_size=args.yolo_size,
         url_yolo_model=f"https://huggingface.co/Bingsu/adetailer/resolve/main/face_yolov{args.yolo_size}.pt",
-        file_yolo_model=os.path.abspath(
-            os.path.join(base_dir, f"face_yolov{args.yolo_size}.pt")
-        ),
+        file_yolo_model=path_in_base(f"face_yolov{args.yolo_size}.pt"),
         # API keys (from env)
-        api_key_gemini=os.environ.get("GOOGLE_API_KEY", ""),
-        hf_token=os.environ.get("HF_TOKEN", ""),
-        pexels_api_key=os.environ.get("PEXELS_API_KEY", ""),
+        api_key_gemini=env.get("GOOGLE_API_KEY", ""),
+        api_key_nvidia=env.get("NVIDIA_API_KEY", ""),
+        hf_token=env.get("HF_TOKEN", ""),
+        pexels_api_key=env.get("PEXELS_API_KEY", ""),
         # Main settings
         source_platform="tiktok" if args.tiktok else args.source,
         url_youtube=args.url,
+        cookies_file=os.path.abspath(args.cookies) if args.cookies else env.get("YTDLP_COOKIES_FILE") or None,
         clip_count=args.clips,
         aspect_ratio=args.ratio,
+        min_clip_duration=float(args.min_duration),
+        max_clip_duration=float(args.max_duration),
         download_source_height=args.source_height,
         render_output_height=args.render_height,
         # Content & hook
         max_words_per_subtitle=args.words_per_sub,
         hook_duration=args.hook_duration,
+        hook_teaser=args.hook_teaser,
         hook_source=args.hook_source,
         hook_source_start=args.hook_source_start,
-        # Hook V2 & Segment Trimming
-        hook_v2=args.hook_v2,
-        hook_v2_items=args.hook_v2_items,
-        hook_v2_style=args.hook_v2_style,
-        white_flash_duration=args.white_flash_duration,
         no_segment_trim=args.no_segment_trim,
         silence_trim=args.silence_trim,
         use_broll=not args.no_broll,
-        use_hook_glitch=not args.no_hook,
         use_auto_bgm=not args.no_bgm,
         use_karaoke_effect=not args.no_karaoke,
         use_split_screen=args.split_screen,
@@ -841,12 +895,17 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         split_v_align=args.split_v_align,
         split_auto_zoom=args.split_auto_zoom,
         split_max_zoom=args.split_max_zoom,
+        # Framing
+        layout=args.layout,
+        speaker_tracking=not args.no_speaker_tracking,
+        static_crop=args.static_crop,
         # Subtitles & typography
         no_subs=args.no_subs,
         active_font_style=args.font_style,
         font_presets=FONT_PRESETS,
-        use_advanced_text=args.advanced_text,
-        use_advanced_text_on_hook=args.advanced_text_hook,
+        use_advanced_text=not args.simple_captions,
+        caption_case=args.caption_case,
+        title_overlay=not args.no_title_overlay,
         # ASS position values
         ass_align_916=ASS_ALIGN_916,
         ass_margin_916=ASS_MARGIN_916,
@@ -859,21 +918,21 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         accent_word_color=ACCENT_WORD_COLOR,
         # Asset URLs
         url_font_thumbnail=URL_FONT_THUMBNAIL,
-        url_glitch_video=URL_GLITCH_VIDEO,
         url_mediapipe_model=URL_MEDIAPIPE_MODEL,
         # BGM
-        bgm_base_volume=BGM_BASE_VOLUME,
+        bgm_base_volume=args.bgm_volume,
         bgm_mode=args.bgm_mode,
         bgm_moods=BGM_MOODS,
-        bgm_dir=BGM_DIR,
-        # Whisper
+        bgm_dir=os.path.abspath(args.bgm_dir) if args.bgm_dir else os.path.join(base_dir, "assets", "bgm"),
+        # Whisper & language
         use_dlp_subs=args.use_dlp_subs,
         whisper_model=args.whisper_model,
+        whisper_language=args.language,
+        caption_script=args.caption_script,
         whisper_device=args.whisper_device,
         whisper_compute_type=args.whisper_compute_type,
         # AI
         ai_provider=args.ai_provider,
-        api_key_nvidia=os.environ.get("NVIDIA_API_KEY", ""),
         nvidia_model=args.nvidia_model,
         gemini_model=args.gemini_model,
         gemini_fallback_model=args.gemini_fallback_model,
@@ -882,7 +941,13 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
             os.path.abspath(args.target_accounts) if args.target_accounts else None
         ),
         no_account_routing=args.no_account_routing,
-        # Tracking Tuning
+        performance_file=(
+            os.path.abspath(args.performance_file)
+            if args.performance_file
+            else os.path.join(base_outputs, "channel_performance.json")
+        ),
+        no_channel_learning=args.no_channel_learning,
+        # Tracking tuning
         track_step=args.track_step,
         track_deadzone=args.track_deadzone,
         track_smooth=args.track_smooth,
@@ -892,18 +957,14 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         track_smooth_window=args.track_smooth_window,
         scene_cut_threshold=args.scene_cut_threshold,
         track_iou_threshold=args.track_iou_threshold,
+        # Video quality
         video_quality_cq=args.video_cq,
         video_quality_crf=args.video_crf,
         video_bitrate=args.video_bitrate,
         video_sharpen=args.video_sharpen,
         video_preset=args.video_preset,
         video_scale_algo=args.video_scale_algo,
-        box_face_detection=args.box_face_detection,
-        dev_mode=args.dev_mode,
-        dev_mode_with_output=args.dev_mode_with_output,
-        dev_mode_with_output_merge=args.dev_mode_with_output_merge,
-        track_lines=args.track_lines,
-        static_crop=args.static_crop,
+        render_fps=None,  # set by the runner from the source video
         # Story Clip Mode
         story_mode=args.story_mode,
         story_recipe_path=os.path.abspath(args.story_recipe) if args.story_recipe else None,
@@ -922,8 +983,6 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         voiceover_length=args.voiceover_length,
         voiceover_volume=args.voiceover_volume,
         original_volume=args.original_volume,
-        edge_glow=args.edge_glow,
-        edge_glow_mode=args.edge_glow_mode,
         # Watermark
         watermark_enabled=args.watermark,
         watermark_text=args.text,
@@ -935,4 +994,10 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         watermark_scale=args.watermark_scale,
     )
 
-    return cfg
+
+def build_config(argv: list[str] | None = None) -> SimpleNamespace:
+    """Parse CLI args, validate them, and build the runtime config."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    _validate_args(parser, args)
+    return config_from_args(args)

@@ -3,6 +3,7 @@ Shared helpers for the Studio rendering pipeline: duration formatting,
 FFmpeg value escaping, OpenCV scaling and aspect-ratio maths.
 """
 
+import math
 import os
 
 import cv2
@@ -33,6 +34,18 @@ def format_seconds(seconds):
 def escape_ffmpeg_filter_value(value: str) -> str:
     """Escape a value so it is safe inside an FFmpeg filter expression."""
     return str(value).replace("\\", r"\\").replace(":", r"\:").replace("'", r"\'")
+
+
+def ffmpeg_filter_path(path: str) -> str:
+    """
+    Quote a file path for use as a filter option (``subtitles=...``, ``fontsdir=...``).
+
+    A filtergraph is unescaped twice, so a singly escaped path broke on any
+    drive letter (``C:\\...``) and on commas or brackets. Forward slashes inside
+    single quotes, with the colon escaped, survive both levels on every OS.
+    """
+    text = os.path.abspath(str(path)).replace("\\", "/").replace(":", r"\:")
+    return "'" + text.replace("'", r"'\''") + "'"
 
 
 def _get_cv2_interpolation(cfg=None):
@@ -90,3 +103,111 @@ def _get_render_dims(cfg, ratio, source_h=1080):
         out_h += 1
 
     return out_w, out_h
+
+
+def make_blur_fill(frame, out_w, out_h, cfg=None):
+    """
+    Fit the whole frame inside ``out_w`` x ``out_h`` over a blurred, darkened copy of itself.
+
+    Used for footage a face crop would ruin (slides, screen recordings, gameplay)
+    and for mismatched landscape output, instead of black bars.
+    """
+    h, w = frame.shape[:2]
+
+    cover = max(out_w / w, out_h / h)
+    bg_w, bg_h = max(out_w, math.ceil(w * cover)), max(out_h, math.ceil(h * cover))
+    background = cv2.resize(frame, (bg_w, bg_h), interpolation=cv2.INTER_AREA)
+    x0, y0 = (bg_w - out_w) // 2, (bg_h - out_h) // 2
+    background = background[y0:y0 + out_h, x0:x0 + out_w]
+    # Blurring a small copy is far cheaper than a huge kernel at full size.
+    small = cv2.resize(background, (max(1, out_w // 8), max(1, out_h // 8)), interpolation=cv2.INTER_AREA)
+    small = cv2.GaussianBlur(small, (0, 0), 4)
+    background = cv2.resize(small, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
+    background = cv2.convertScaleAbs(background, alpha=0.6, beta=0)
+
+    fit = min(out_w / w, out_h / h)
+    fg_w, fg_h = max(2, int(w * fit) // 2 * 2), max(2, int(h * fit) // 2 * 2)
+    foreground = _resize_frame(frame, (fg_w, fg_h), cfg)
+    x, y = (out_w - fg_w) // 2, (out_h - fg_h) // 2
+    background[y:y + fg_h, x:x + fg_w] = foreground
+    return background
+
+
+def blur_fill_filter(out_w, out_h, algo="lanczos"):
+    """The FFmpeg filter chain equivalent of ``make_blur_fill`` (prefix with an input label)."""
+    small_w, small_h = max(2, out_w // 8 // 2 * 2), max(2, out_h // 8 // 2 * 2)
+    return (
+        "split=2[bf_bg][bf_fg];"
+        f"[bf_bg]scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},"
+        f"scale={small_w}:{small_h},gblur=sigma=4,scale={out_w}:{out_h},eq=brightness=-0.15[bf_back];"
+        f"[bf_fg]scale={out_w}:{out_h}:force_original_aspect_ratio=decrease:flags={algo}[bf_front];"
+        "[bf_back][bf_front]overlay=(W-w)/2:(H-h)/2"
+    )
+
+
+def _path_keyframes(values, step, cut_px):
+    """
+    Reduce a sampled path to keyframes ``(t, value, is_cut)``.
+
+    A sample is kept only where the path bends, so still shots and steady pans
+    collapse to a handful of points; a jump larger than ``cut_px`` between two
+    samples is marked as a cut and rendered as a step, not a fast pan.
+    """
+    keys = [(0.0, values[0], False)]
+    for i in range(1, len(values)):
+        prev_t, prev_v, _ = keys[-1]
+        jump = abs(values[i] - values[i - 1]) > cut_px
+        if jump:
+            if keys[-1][0] != (i - 1) * step:
+                keys.append(((i - 1) * step, values[i - 1], False))
+            keys[-1] = (keys[-1][0], keys[-1][1], True)
+            keys.append((i * step, values[i], False))
+            continue
+        if i == len(values) - 1:
+            keys.append((i * step, values[i], False))
+            continue
+        # Keep the sample if the straight line from the last keyframe to the
+        # next sample misses it by more than a pixel.
+        span = (i + 1) * step - prev_t
+        predicted = prev_v + (values[i + 1] - prev_v) * ((i * step - prev_t) / span)
+        if abs(values[i + 1] - values[i]) > cut_px or abs(predicted - values[i]) > 1.0:
+            keys.append((i * step, values[i], False))
+    return keys
+
+
+def _piecewise_expression(keys):
+    """A balanced FFmpeg expression tree over ``t`` for the keyframes (depth ~log2 n)."""
+    if len(keys) == 1:
+        return f"{keys[0][1]:g}"
+
+    def segment(i):
+        t0, v0, is_cut = keys[i]
+        t1, v1, _ = keys[i + 1]
+        if is_cut or v0 == v1:
+            return f"{v0:g}"
+        return f"{v0:g}+({v1 - v0:g})*(t-{t0:.3f})/{t1 - t0:.3f}"
+
+    def build(lo, hi):
+        if hi - lo == 1:
+            return segment(lo)
+        mid = (lo + hi) // 2
+        return f"if(lt(t,{keys[mid][0]:.3f}),{build(lo, mid)},{build(mid, hi)})"
+
+    return build(0, len(keys) - 1)
+
+
+def build_crop_expressions(origin_at, duration, step=0.1, cut_px=40):
+    """
+    FFmpeg ``crop`` x/y expressions that follow the camera path over clip time ``t``.
+
+    ``origin_at(t)`` returns the crop's top-left ``(x, y)``. Expressions work on
+    every FFmpeg version, unlike ``sendcmd`` crop commands, which older builds
+    (e.g. Ubuntu 22.04's 4.4 on Colab) ignore — rendering a camera that never moves.
+    """
+    samples = [origin_at(i * step) for i in range(int(math.ceil(duration / step)) + 1)]
+    xs = [float(x) for x, _ in samples]
+    ys = [float(y) for _, y in samples]
+    return (
+        _piecewise_expression(_path_keyframes(xs, step, cut_px)),
+        _piecewise_expression(_path_keyframes(ys, step, cut_px)),
+    )

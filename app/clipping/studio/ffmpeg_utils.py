@@ -2,6 +2,7 @@
 FFmpeg and encoder utilities for Studio rendering pipeline.
 """
 
+import functools
 import subprocess
 
 from ..progress import ProgressBar
@@ -24,9 +25,10 @@ def format_seconds(seconds):
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
+@functools.lru_cache(maxsize=None)
 def _ffmpeg_has_encoder(name: str) -> bool:
     """
-    Check whether a specific FFmpeg encoder is available.
+    Check whether a specific FFmpeg encoder is available (cached per process).
 
     Args:
         name: Encoder name, for example `h264_nvenc`.
@@ -43,9 +45,16 @@ def _ffmpeg_has_encoder(name: str) -> bool:
     return name in result.stdout
 
 
+_RUNTIME_TEST_CACHE: dict[tuple, tuple[bool, str]] = {}
+_ANNOUNCED: set[str] = set()
+
+
 def _test_encoder_runtime(encoder_args):
     """
     Validate encoder arguments by running a short synthetic FFmpeg encode.
+
+    Every renderer asks for the encoder once per clip part, so the result is
+    cached: the test encode used to rerun for every hook, segment and clip.
 
     Args:
         encoder_args: FFmpeg encoder argument list to test.
@@ -53,6 +62,10 @@ def _test_encoder_runtime(encoder_args):
     Returns:
         Tuple `(ok, stderr_tail)` where `ok` is True on success.
     """
+    key = tuple(encoder_args)
+    if key in _RUNTIME_TEST_CACHE:
+        return _RUNTIME_TEST_CACHE[key]
+
     cmd = (
         [
             "ffmpeg",
@@ -71,7 +84,15 @@ def _test_encoder_runtime(encoder_args):
     result = subprocess.run(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
-    return result.returncode == 0, result.stderr[-1000:]
+    _RUNTIME_TEST_CACHE[key] = (result.returncode == 0, result.stderr[-1000:])
+    return _RUNTIME_TEST_CACHE[key]
+
+
+def _announce(message: str) -> None:
+    """Print an encoder choice once per process instead of once per clip part."""
+    if message not in _ANNOUNCED:
+        _ANNOUNCED.add(message)
+        print(message, flush=True)
 
 
 def _get_auto_bitrate(height: int) -> str:
@@ -87,12 +108,14 @@ def detect_video_encoder(cfg=None, target_h=1080):
     Select the best available video encoder with conservative fallback.
     Now supports dynamic bitrate scaling for TikTok optimization.
     """
-    nvenc_preset_fast = "p1"
-    nvenc_preset_legacy = "fast"
+    # p1 is NVENC's lowest-quality preset; p4 is visibly cleaner on faces and
+    # captions at the same bitrate, and still far faster than realtime on a T4.
+    nvenc_preset_fast = "p4"
+    nvenc_preset_legacy = "medium"
     nvenc_cq = 25
     cpu_preset = "veryfast"
     cpu_crf = 25
-    
+
     target_bitrate = "auto"
 
     if cfg is not None:
@@ -160,27 +183,27 @@ def detect_video_encoder(cfg=None, target_h=1080):
     if _ffmpeg_has_encoder("h264_nvenc"):
         ok, _ = _test_encoder_runtime(nvenc_args_fastest)
         if ok:
-            print(f"🚀 Using NVIDIA NVENC {nvenc_preset_fast} (Bitrate {target_bitrate}, CQ {nvenc_cq})", flush=True)
+            _announce(f"🚀 Using NVIDIA NVENC {nvenc_preset_fast} (Bitrate {target_bitrate}, CQ {nvenc_cq})")
             return {"name": "h264_nvenc", "args": nvenc_args_fastest}
 
         ok, _ = _test_encoder_runtime(nvenc_args_legacy)
         if ok:
-            print(f"🚀 Using NVIDIA NVENC {nvenc_preset_legacy} (Bitrate {target_bitrate}, CQ {nvenc_cq})", flush=True)
+            _announce(f"🚀 Using NVIDIA NVENC {nvenc_preset_legacy} (Bitrate {target_bitrate}, CQ {nvenc_cq})")
             return {"name": "h264_nvenc", "args": nvenc_args_legacy}
 
     if _ffmpeg_has_encoder("h264_amf"):
         ok, _ = _test_encoder_runtime(amf_args)
         if ok:
-            print(f"🚀 Using AMD AMF (Bitrate {target_bitrate})", flush=True)
+            _announce(f"🚀 Using AMD AMF (Bitrate {target_bitrate})")
             return {"name": "h264_amf", "args": amf_args}
 
     if _ffmpeg_has_encoder("h264_vaapi"):
         ok, _ = _test_encoder_runtime(vaapi_args)
         if ok:
-            print(f"🚀 Using AMD VAAPI (Bitrate {target_bitrate})", flush=True)
+            _announce(f"🚀 Using AMD VAAPI (Bitrate {target_bitrate})")
             return {"name": "h264_vaapi", "args": vaapi_args}
 
-    print(f"⚠️ Falling back to CPU libx264 ({cpu_preset}, CRF {cpu_crf}, Max {target_bitrate})", flush=True)
+    _announce(f"⚠️ Falling back to CPU libx264 ({cpu_preset}, CRF {cpu_crf}, Max {target_bitrate})")
     return {"name": "libx264", "args": cpu_args}
 
 
@@ -199,7 +222,7 @@ def get_ts_encode_args(video_encoder, fps=30):
         "-pix_fmt",
         "yuv420p",
         "-r",
-        str(fps),
+        f"{fps:g}",
         "-c:a",
         "aac",
         "-ar",
@@ -232,9 +255,54 @@ def get_mp4_encode_args(video_encoder, fps):
     ]
 
 
+INTERMEDIATE_QUALITY = 16
+
+
+def _intermediate_encoder(video_encoder, quality=INTERMEDIATE_QUALITY):
+    """
+    Derive fast, near-transparent encoder settings for an intermediate file.
+
+    Every clip is encoded twice — the framed video here, then again when the
+    subtitles are burned in — so this first generation uses a low CQ/CRF (no
+    compounded artefacts) with the encoder's fastest preset and no rate caps.
+    Encoders without a quality knob (AMF, VAAPI) keep their settings.
+    """
+    args = list(video_encoder["args"])
+    if "-cq" not in args and "-crf" not in args:
+        return video_encoder
+
+    out = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ("-b:v", "-maxrate", "-bufsize") and i + 1 < len(args):
+            i += 2
+            continue
+        if arg in ("-cq", "-crf") and i + 1 < len(args):
+            out += [arg, str(quality)]
+            i += 2
+            continue
+        out.append(arg)
+        i += 1
+
+    if "-preset" in out:
+        preset_idx = out.index("-preset") + 1
+        if video_encoder["name"] == "libx264":
+            out[preset_idx] = "ultrafast"
+        elif video_encoder["name"] == "h264_nvenc" and out[preset_idx].startswith("p"):
+            out[preset_idx] = "p1"
+
+    if video_encoder["name"] == "h264_nvenc":
+        out += ["-b:v", "0"]  # pure constant-quality VBR
+    return {"name": video_encoder["name"], "args": out}
+
+
 def open_ffmpeg_video_writer(output_path, width, height, fps, video_encoder):
     """
     Start an FFmpeg process that accepts raw BGR frames via stdin.
+
+    The output is an intermediate file that is re-encoded later, so it is
+    written with ``_intermediate_encoder`` settings.
 
     Args:
         output_path: Target MP4 path.
@@ -246,6 +314,7 @@ def open_ffmpeg_video_writer(output_path, width, height, fps, video_encoder):
     Returns:
         Running `subprocess.Popen` object.
     """
+    video_encoder = _intermediate_encoder(video_encoder)
     cmd = (
         [
             "ffmpeg",
@@ -340,4 +409,3 @@ def run_ffmpeg_with_progress(ffmpeg_cmd, total_duration, label="Render"):
     # Only snap the bar to 100% if ffmpeg actually finished the encode.
     progress.close(complete=return_code == 0)
     return return_code, error_lines[-20:]
-

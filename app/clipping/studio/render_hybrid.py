@@ -1,17 +1,329 @@
+"""
+clipping.studio.render_hybrid — The default single-camera renderer.
+
+For every clip part it:
+  1. analyses the faces — and, with several people in frame, who is talking;
+  2. chooses the framing: a crop that follows the chosen face, or, for footage
+     without faces (slides, screen recordings, gameplay), the whole frame over
+     a blurred copy of itself;
+  3. renders the silent video.
+
+Rendering is one FFmpeg pass (the crop follows a time expression) unless
+per-frame compositing is needed for B-roll or a watermark; those clips go
+through the OpenCV frame loop, which is also the fallback if FFmpeg refuses the
+fast path.
+"""
+
+import bisect
 import math
 import os
+import statistics
 import urllib.request
 
 import cv2
-import numpy as np
 import mediapipe as mp
 
 from ..progress import ProgressBar
-from .broll import crop_center_broll
+from .active_speaker import get_mouth_meter, select_speaker_faces
+from .broll import crop_center_broll, open_broll_captures, read_broll_frame
 from .face_detection import get_face_detector
-from .utils import RATIO_MAP, format_seconds, _resize_frame, _is_vertical_ratio, _get_render_dims
-from .ffmpeg_utils import detect_video_encoder, open_ffmpeg_video_writer
+from .ffmpeg_utils import (
+    _intermediate_encoder,
+    build_ffmpeg_progress_cmd,
+    detect_video_encoder,
+    get_mp4_encode_args,
+    open_ffmpeg_video_writer,
+    run_ffmpeg_with_progress,
+)
+from .utils import (
+    RATIO_MAP,
+    _get_render_dims,
+    _is_vertical_ratio,
+    _resize_frame,
+    blur_fill_filter,
+    build_crop_expressions,
+    make_blur_fill,
+)
 from .watermark import apply_watermark
+
+# Seconds a large face jump must persist before the camera cuts to it. Shorter
+# jumps are a false detection or a second person briefly leaning into frame.
+SNAP_CONFIRM_SECONDS = 0.5
+
+# Below this share of analysed moments with a face, the clip is treated as
+# faceless footage and the whole frame is fitted over a blurred background.
+MIN_FACE_SHARE = 0.3
+
+# Where the face sits vertically when the crop is shorter than the source.
+FACE_VERTICAL_ANCHOR = 0.42
+
+BROLL_TRANSITION = 0.3
+BROLL_MAX_ZOOM = 1.10
+
+_YOLO_MODELS: dict = {}
+
+
+def _face_detector_fn(cfg):
+    """Return ``detect(frame) -> [(x1, y1, x2, y2), ...]`` for the configured model."""
+    if cfg.face_detector == "yolo":
+        model = _YOLO_MODELS.get(cfg.file_yolo_model)
+        if model is None:
+            if not os.path.exists(cfg.file_yolo_model):
+                print(f"   📥 Downloading the YOLOv8 face model ({cfg.yolo_size})...")
+                urllib.request.urlretrieve(cfg.url_yolo_model, cfg.file_yolo_model)
+            from ultralytics import YOLO
+
+            model = YOLO(cfg.file_yolo_model)
+            _YOLO_MODELS[cfg.file_yolo_model] = model
+
+        def detect_yolo(frame):
+            results = model(frame, verbose=False)
+            if not results or len(results[0].boxes) == 0:
+                return []
+            return [tuple(float(v) for v in box) for box in results[0].boxes.xyxy.cpu().numpy()]
+
+        return detect_yolo
+
+    detector = get_face_detector(cfg)
+
+    def detect_mediapipe(frame):
+        results = detector.detect(
+            mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        )
+        return [
+            (bb.origin_x, bb.origin_y, bb.origin_x + bb.width, bb.origin_y + bb.height)
+            for bb in (det.bounding_box for det in (results.detections or []))
+        ]
+
+    return detect_mediapipe
+
+
+def _analyse_faces(cap, fps, start_clip, duration, step, detect, meter, label):
+    """
+    Sample the clip every *step* seconds.
+
+    Frames are read sequentially (``grab`` skips the ones in between) instead
+    of seeking to every sample, which decoded from the previous keyframe each time.
+    """
+    samples = []
+    cap.set(cv2.CAP_PROP_POS_MSEC, start_clip * 1000)
+    bar = ProgressBar(duration, f"{label} - Face analysis")
+    frame_idx = 0
+    next_t = 0.0
+    half_frame = 0.5 / fps
+
+    while next_t <= duration:
+        if frame_idx / fps + half_frame < next_t:
+            if not cap.grab():
+                break
+            frame_idx += 1
+            continue
+
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frame_idx += 1
+
+        boxes = detect(frame)
+        mouths = [None] * len(boxes)
+        if meter is not None and len(boxes) >= 2:
+            mouths = [meter.measure(frame, box) for box in boxes]
+        samples.append({"time": next_t, "boxes": boxes, "mouths": mouths})
+
+        bar.update(next_t)
+        next_t += step
+
+    bar.close(f"🧠 {label} - Face analysis complete.")
+    return samples
+
+
+def _camera_path(samples, chosen, crop_w, step, deadzone_ratio, smooth_factor, snap_px):
+    """Turn the chosen face per sample into a smoothed camera centre per sample."""
+    raw = []
+    for sample, box in zip(samples, chosen):
+        if box:
+            raw.append({"time": sample["time"], "box": box,
+                        "cx": (box[0] + box[2]) / 2, "cy": (box[1] + box[3]) / 2})
+        else:
+            raw.append({"time": sample["time"], "box": None, "cx": None, "cy": None})
+
+    first_hit = next((r for r in raw if r["box"]), None)
+    if first_hit is None:
+        return []
+
+    # A missed detection (head turned, motion blur) holds the last known face
+    # instead of jumping to the frame centre and back.
+    last_cx, last_cy = first_hit["cx"], first_hit["cy"]
+    for r in raw:
+        if r["box"]:
+            last_cx, last_cy = r["cx"], r["cy"]
+        else:
+            r["cx"], r["cy"] = last_cx, last_cy
+
+    cam_cx = statistics.median(r["cx"] for r in raw[:5])
+    cam_cy = statistics.median(r["cy"] for r in raw[:5])
+    deadzone_px = crop_w * deadzone_ratio
+    snap_confirm = max(1, round(SNAP_CONFIRM_SECONDS / step))
+    jump_start = None
+    smooth = []
+
+    for i, r in enumerate(raw):
+        face_cx, face_cy = r["cx"], r["cy"]
+
+        if abs(face_cx - cam_cx) > snap_px:
+            # Hold still until the jump proves real, then cut — backdated to
+            # where the jump began so it lands on the source's own cut.
+            if jump_start is None:
+                jump_start = i
+            if i - jump_start + 1 >= snap_confirm:
+                cam_cx = face_cx
+                for s in smooth[jump_start:]:
+                    s["cx"] = cam_cx
+                jump_start = None
+        else:
+            jump_start = None
+            if face_cx > cam_cx + deadzone_px:
+                cam_cx += (face_cx - (cam_cx + deadzone_px)) * smooth_factor
+            elif face_cx < cam_cx - deadzone_px:
+                cam_cx += (face_cx - (cam_cx - deadzone_px)) * smooth_factor
+
+        cam_cy += (face_cy - cam_cy) * smooth_factor
+        smooth.append({"time": r["time"], "cx": cam_cx, "cy": cam_cy})
+
+    return smooth
+
+
+def _position_fn(smooth, snap_px, default):
+    """Interpolate the camera centre at any clip time (hard cuts are not interpolated)."""
+    times = [s["time"] for s in smooth]
+
+    def position(t):
+        if not smooth:
+            return default
+        if t <= times[0]:
+            return smooth[0]["cx"], smooth[0]["cy"]
+        if t >= times[-1]:
+            return smooth[-1]["cx"], smooth[-1]["cy"]
+        i = bisect.bisect_right(times, t) - 1
+        a, b = smooth[i], smooth[i + 1]
+        if b["time"] == a["time"]:
+            return a["cx"], a["cy"]
+        if abs(b["cx"] - a["cx"]) > snap_px:
+            chosen = a if t < (a["time"] + b["time"]) / 2 else b
+            return chosen["cx"], chosen["cy"]
+        frac = (t - a["time"]) / (b["time"] - a["time"])
+        return a["cx"] + (b["cx"] - a["cx"]) * frac, a["cy"] + (b["cy"] - a["cy"]) * frac
+
+    return position
+
+
+def _render_with_ffmpeg(input_video, output_video, start_clip, duration, fps, mode,
+                        out_dims, crop, origin_at, moving, cfg, video_encoder, label):
+    """Render the framing in one FFmpeg pass. Returns False if FFmpeg failed."""
+    out_w, out_h = out_dims
+    algo = str(getattr(cfg, "video_scale_algo", "lanczos"))
+
+    if mode == "scale":
+        graph = f"[0:v]scale={out_w}:{out_h}:flags={algo},setsar=1[v]"
+    elif mode == "fill":
+        graph = f"[0:v]{blur_fill_filter(out_w, out_h, algo)},setsar=1[v]"
+    else:
+        crop_w, crop_h = crop
+        if moving:
+            x_expr, y_expr = build_crop_expressions(origin_at, duration)
+        else:
+            x_expr, y_expr = (str(v) for v in origin_at(0.0))
+        # Quoted so the commas inside the expressions don't split the filter chain.
+        graph = (
+            f"[0:v]crop=w={crop_w}:h={crop_h}:x='{x_expr}':y='{y_expr}',"
+            f"scale={out_w}:{out_h}:flags={algo},setsar=1[v]"
+        )
+
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-ss", f"{start_clip:.3f}", "-t", f"{duration:.3f}", "-i", input_video,
+        "-filter_complex", graph, "-map", "[v]", "-an",
+    ] + get_mp4_encode_args(_intermediate_encoder(video_encoder), fps)
+
+    rc, errors = run_ffmpeg_with_progress(
+        build_ffmpeg_progress_cmd(cmd, output_video), duration, label=f"{label} - Rendering"
+    )
+
+    if rc != 0:
+        print(f"   ⚠️ {label} - FFmpeg framing pass failed: {' | '.join(errors[-3:])}")
+        return False
+    return True
+
+
+def _render_with_opencv(cap, output_video, start_clip, duration, fps, mode, out_dims,
+                        crop, origin_at, broll_data, cfg, video_encoder, label):
+    """Frame-by-frame render, needed for B-roll inserts and watermarks."""
+    out_w, out_h = out_dims
+    crop_w, crop_h = crop
+
+    broll_caps = open_broll_captures(broll_data)
+    writer = open_ffmpeg_video_writer(output_video, out_w, out_h, fps, video_encoder)
+
+    try:
+        cap.set(cv2.CAP_PROP_POS_MSEC, start_clip * 1000)
+        frame_count = 0
+        print(f"🎬 {label} - Frame render started...", flush=True)
+        render_bar = ProgressBar(duration, f"{label} - Rendering")
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            t = frame_count / fps
+            if t > duration:
+                break
+            absolute_time = start_clip + t
+
+            if mode == "fill":
+                out_frame = make_blur_fill(frame, out_w, out_h, cfg)
+            elif mode == "scale":
+                out_frame = _resize_frame(frame, (out_w, out_h), cfg)
+            else:
+                x, y = origin_at(t)
+                out_frame = _resize_frame(frame[y:y + crop_h, x:x + crop_w], (out_w, out_h), cfg)
+
+            for bc in broll_caps:
+                if not bc["start"] <= absolute_time <= bc["end"]:
+                    continue
+                elapsed = absolute_time - bc["start"]
+                frame_b = read_broll_frame(bc, elapsed)
+                if frame_b is not None:
+                    span = bc["end"] - bc["start"]
+                    zoom = 1.0 + (BROLL_MAX_ZOOM - 1.0) * (elapsed / span if span > 0 else 0)
+                    frame_b = crop_center_broll(frame_b, out_w, out_h)
+                    matrix = cv2.getRotationMatrix2D((out_w / 2, out_h / 2), 0, zoom)
+                    frame_b = cv2.warpAffine(frame_b, matrix, (out_w, out_h))
+
+                    alpha = 1.0
+                    if elapsed < BROLL_TRANSITION:
+                        alpha = elapsed / BROLL_TRANSITION
+                    elif bc["end"] - absolute_time < BROLL_TRANSITION:
+                        alpha = (bc["end"] - absolute_time) / BROLL_TRANSITION
+                    out_frame = frame_b if alpha >= 1.0 else cv2.addWeighted(
+                        frame_b, alpha, out_frame, 1.0 - alpha, 0
+                    )
+                break
+
+            if getattr(cfg, "watermark_enabled", False):
+                out_frame = apply_watermark(out_frame, cfg)
+
+            writer.stdin.write(out_frame.tobytes())
+            frame_count += 1
+            render_bar.update(t)
+
+        render_bar.close()
+        writer.stdin.close()
+        stderr_data = writer.stderr.read().decode("utf-8", errors="ignore")
+        if writer.wait() != 0:
+            raise RuntimeError(f"The FFmpeg writer failed: {stderr_data[-1000:]}")
+    finally:
+        for bc in broll_caps:
+            bc["cap"].release()
 
 
 def render_hybrid_video(
@@ -25,458 +337,126 @@ def render_hybrid_video(
     label="Hybrid",
 ):
     """
-    Render a hybrid video combining main footage and b-roll with dynamic panning based on face tracking.
+    Render one clip part with automatic framing.
 
     Args:
         input_video (str): Source video file path.
-        output_video (str): Output video file path.
+        output_video (str): Output (silent, intermediate) video path.
         start_clip (float): Start timestamp in seconds.
         end_clip (float): End timestamp in seconds.
-        ratio (str): Output ratio string ('9:16' or '16:9').
-        cfg: Configuration object for parameters like deadzones and smoothing factors.
-        broll_data (list, optional): Metadata dicts of B-roll timing to overlay.
-        label (str, optional): The UI label used for rendering progress output.
+        ratio (str): Output ratio string.
+        cfg: Runtime config (tracking tuning, layout, speaker tracking, encoder).
+        broll_data (list, optional): B-roll inserts (dicts with filepath/start_time/end_time).
+        label (str, optional): Label used in progress output.
 
     Returns:
-        callable: A lambda `get_x_final(t)` which returns the dynamic X crop position given a timestamp `t`.
-
-    Side Effects:
-        Reads frames, runs face detection (YOLO or Mediapipe), and writes processed frames via FFMPEG.
-        Loads B-Roll clips and composites them automatically.
-
-    Raises:
-        Exceptions are typically handled and may cause a hard exit if critical video rendering fails.
+        callable: ``get_x(t)`` — the camera's horizontal centre at clip time ``t``.
     """
-    if broll_data is None:
-        broll_data = []
-
-    # =======================================================
-    # 🎛️ CAMERA TUNING PARAMETERS
-    # =======================================================
-    STEP_DETECTION     = cfg.track_step if cfg.track_step is not None else 0.25   # the AI checks for faces every 0.25 s
-    # STEP_DETECTION     = 0.5   # the AI checks for faces every 0.5 s
-    # STEP_DETECTION     = max(0.5, (end_clip - start_clip) / 60.0)   # [OLD] face check every max(0.5, clip duration / 60) seconds
-
-    DEADZONE_RATIO   = cfg.track_deadzone if cfg.track_deadzone is not None else 0.15  # the middle 15% is a safe zone where the camera does not move
-    # DEADZONE_RATIO   = 0.25  # the middle 25% is the safe zone
-    # DEADZONE_RATIO   = 0.20  # [OLD] the middle 20% was the safe zone
-
-    SMOOTH_FACTOR    = cfg.track_smooth if cfg.track_smooth is not None else 0.30  # How fast the camera catches up (30% of the distance). Makes the motion very smooth.
-    # SMOOTH_FACTOR    = 0.15  # How fast the camera catches up (15% of the distance). Makes the motion very smooth.
-    # SMOOTH_FACTOR    = 0.10  # [NEW; NOT USED] How fast the camera catches up (10% of the distance). Makes the motion very smooth.
-
-    JITTER_THRESHOLD = cfg.track_jitter if cfg.track_jitter is not None else 5     # Ignore shifts smaller than 5 pixels (anti-shake / micro-jitter)
-    # JITTER_THRESHOLD = 4     # [OLD] Ignore shifts smaller than 4 pixels (anti-shake / micro-jitter)
-
-    # A face jumping further than this fraction of the screen width counts as a
-    # new person (hard cut). Standard clips default to aggressive snapping so
-    # wide-to-tight camera cuts land hard; --track-snap overrides it.
-    SNAP_THRESHOLD   = cfg.track_snap if cfg.track_snap is not None else 0.08
-    # =======================================================
+    broll_data = broll_data or []
+    step = cfg.track_step if cfg.track_step is not None else 0.25
+    deadzone_ratio = cfg.track_deadzone if cfg.track_deadzone is not None else 0.15
+    smooth_factor = cfg.track_smooth if cfg.track_smooth is not None else 0.30
+    snap_threshold = cfg.track_snap if cfg.track_snap is not None else 0.08
 
     video_encoder = detect_video_encoder(cfg)
 
-    yolo_model = None
-    detector = None
-    if cfg.face_detector == "yolo":
-        if not os.path.exists(cfg.file_yolo_model):
-            print(f"   📥 Downloading the YOLOv8 face model ({cfg.yolo_size})...")
-            import urllib.request
-
-            urllib.request.urlretrieve(cfg.url_yolo_model, cfg.file_yolo_model)
-        from ultralytics import YOLO
-
-        yolo_model = YOLO(cfg.file_yolo_model)
-    else:
-        detector = get_face_detector(cfg)
-
     cap = cv2.VideoCapture(input_video)
-    orig_fps = cap.get(cv2.CAP_PROP_FPS)
-    if math.isnan(orig_fps) or orig_fps == 0:
-        orig_fps = 30.0
-
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if math.isnan(fps) or fps <= 0:
+        fps = 30.0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    # Dynamic crop dimensions based on target ratio
-    w_part, h_part = RATIO_MAP.get(ratio, (16, 9))
-    if _is_vertical_ratio(ratio):
-        crop_w = int(height * w_part / h_part)
-        crop_h = height
-    else:
-        crop_w = width
-        crop_h = height
-    default_cx = width // 2
-    default_cy = height // 2
     duration = end_clip - start_clip
+    out_dims = _get_render_dims(cfg, ratio, source_h=height)
+    vertical = _is_vertical_ratio(ratio)
 
-    broll_caps = []
-    for br in broll_data:
-        if "filepath" in br and os.path.exists(br["filepath"]):
-            broll_caps.append(
-                {
-                    "start": br["start_time"],
-                    "end": br["end_time"],
-                    "cap": cv2.VideoCapture(br["filepath"]),
-                }
-            )
-
-    # PHASE 1: FACE DETECTION
-    raw_data = []
-    current_time = 0.0
-
-    skip_tracking = getattr(cfg, "static_crop", False) and ratio in ["1:1", "3:4", "4:5"]
-
-    if skip_tracking:
-        print(f"🧠 {label} - Static crop enabled (no face tracking)...", flush=True)
-        detect_bar = None
+    # Largest crop of the target shape that fits the source (a portrait source
+    # cropped to 1:1 used to ask for a crop wider than the frame).
+    w_part, h_part = RATIO_MAP.get(ratio, (16, 9))
+    target_ratio = w_part / h_part
+    if width / height > target_ratio:
+        crop_w, crop_h = int(round(height * target_ratio)), height
     else:
-        print(f"🧠 {label} - Face analysis started...", flush=True)
-        detect_bar = ProgressBar(duration, f"{label} - Face analysis")
+        crop_w, crop_h = width, int(round(width / target_ratio))
+    crop_w, crop_h = max(2, crop_w - crop_w % 2), max(2, crop_h - crop_h % 2)
 
-    while current_time <= duration and not skip_tracking:
-        cap.set(cv2.CAP_PROP_POS_MSEC, (start_clip + current_time) * 1000)
-        ret, frame = cap.read()
-        if not ret:
-            break
+    layout = str(getattr(cfg, "layout", "auto")).lower()
+    static = getattr(cfg, "static_crop", False) and ratio in ("1:1", "3:4", "4:5")
+    snap_px = width * snap_threshold
+    smooth = []
 
-
-        face_box = None
-
-        if cfg.face_detector == "yolo":
-            yolo_results = yolo_model(frame, verbose=False)
-            if yolo_results and len(yolo_results[0].boxes) > 0:
-                boxes = yolo_results[0].boxes.xyxy.cpu().numpy()
-                areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-                largest_idx = areas.argmax()
-                x1, y1, x2, y2 = boxes[largest_idx]
-                center_x = x1 + (x2 - x1) / 2
-                center_y = y1 + (y2 - y1) / 2
-                face_box = (x1, y1, x2, y2)
-        else:
-            results = detector.detect(
-                mp.Image(
-                    image_format=mp.ImageFormat.SRGB,
-                    data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
-                )
-            )
-
-            if results.detections:
-                largest_face = max(
-                    results.detections,
-                    key=lambda d: d.bounding_box.width * d.bounding_box.height,
-                ).bounding_box
-                center_x = largest_face.origin_x + (largest_face.width / 2)
-                center_y = largest_face.origin_y + (largest_face.height / 2)
-                face_box = (
-                    largest_face.origin_x,
-                    largest_face.origin_y,
-                    largest_face.origin_x + largest_face.width,
-                    largest_face.origin_y + largest_face.height,
-                )
-
-        raw_data.append(
-            {
-                "time": current_time,
-                "cx": center_x if face_box else default_cx,
-                "cy": center_y if face_box else default_cy,
-                "box": face_box,
-            }
-        )
-
-        detect_bar.update(current_time)
-
-        current_time += STEP_DETECTION
-
-    if detect_bar is not None:
-        detect_bar.close(f"🧠 {label} - Face analysis complete.")
-
-    # PHASE 2: SMOOTH CAMERA
-    smooth_data = []
-    if raw_data:
-        import statistics as _st
-        initial_cxs = [d["cx"] for d in raw_data[:5]]
-        initial_cys = [d["cy"] for d in raw_data[:5]]
-        cam_cx = _st.median(initial_cxs) if initial_cxs else raw_data[0]["cx"]
-        cam_cy = _st.median(initial_cys) if initial_cys else raw_data[0]["cy"]
-        
-        deadzone_px = crop_w * DEADZONE_RATIO
-        
-        snap_px = width * SNAP_THRESHOLD
-
-        for d in raw_data:
-            face_cx = d["cx"]
-            face_cy = d["cy"]
-
-            if abs(face_cx - cam_cx) > snap_px:
-                cam_cx = face_cx
-            else:
-                if face_cx > cam_cx + deadzone_px:
-                    cam_cx += (face_cx - (cam_cx + deadzone_px)) * SMOOTH_FACTOR
-                elif face_cx < cam_cx - deadzone_px:
-                    cam_cx += (face_cx - (cam_cx - deadzone_px)) * SMOOTH_FACTOR
-
-            # Vertical smoothing
-            cam_cy += (face_cy - cam_cy) * SMOOTH_FACTOR
-
-            smooth_data.append({"time": d["time"], "cx": cam_cx, "cy": cam_cy})
-
-    def get_x(t):
-        if not smooth_data:
-            return default_cx
-        if t <= smooth_data[0]["time"]:
-            return smooth_data[0]["cx"]
-        if t >= smooth_data[-1]["time"]:
-            return smooth_data[-1]["cx"]
-        for i in range(len(smooth_data) - 1):
-            if smooth_data[i]["time"] <= t <= smooth_data[i + 1]["time"]:
-                t1, t2 = smooth_data[i]["time"], smooth_data[i + 1]["time"]
-                cx1, cx2 = smooth_data[i]["cx"], smooth_data[i + 1]["cx"]
-                if t1 == t2: return cx1
-                return cx1 + (cx2 - cx1) * (t - t1) / (t2 - t1)
-        return default_cx
-
-    def get_box(t):
-        if not raw_data:
-            return None
-        if t <= raw_data[0]["time"]:
-            return raw_data[0]["box"]
-        if t >= raw_data[-1]["time"]:
-            return raw_data[-1]["box"]
-        for i in range(len(raw_data) - 1):
-            if raw_data[i]["time"] <= t <= raw_data[i + 1]["time"]:
-                return raw_data[i]["box"]
-        return None
-
-    def _get_pos(t):
-        if not smooth_data:
-            return default_cx, default_cy
-        if t <= smooth_data[0]["time"]:
-            return smooth_data[0]["cx"], smooth_data[0]["cy"]
-        if t >= smooth_data[-1]["time"]:
-            return smooth_data[-1]["cx"], smooth_data[-1]["cy"]
-
-        for i in range(len(smooth_data) - 1):
-            if smooth_data[i]["time"] <= t <= smooth_data[i + 1]["time"]:
-                t1, t2 = smooth_data[i]["time"], smooth_data[i + 1]["time"]
-                cx1, cx2 = smooth_data[i]["cx"], smooth_data[i + 1]["cx"]
-                cy1, cy2 = smooth_data[i]["cy"], smooth_data[i + 1]["cy"]
-                if t1 == t2:
-                    return cx1, cy1
-                frac = (t - t1) / (t2 - t1)
-                return (
-                    cx1 + (cx2 - cx1) * frac,
-                    cy1 + (cy2 - cy1) * frac
-                )
-        return default_cx, default_cy
-
-    def format_seconds(s):
-        mins = int(s) // 60
-        secs = int(s % 60)
-        return f"{mins:02d}:{secs:02d}"
-
-    # PHASE 3: RENDER FRAME
-    base_out_w, base_out_h = _get_render_dims(cfg, ratio, source_h=height)
-    
-    # DEV MODE: Force 16:9 to show context or 2648 ultrawide for merge
-    dev_visualize = cfg.dev_mode and _is_vertical_ratio(ratio)
-    merge_output = dev_visualize and getattr(cfg, "dev_mode_with_output_merge", False)
-    
-    if merge_output:
-        writer_w, writer_h = 2648, 1220
-    elif dev_visualize:
-        writer_w, writer_h = 1920, 1080
+    if not vertical:
+        # Landscape output: scale a matching source, blur-fill anything else
+        # (a portrait source used to get black bars).
+        mode = "scale" if abs(width / height - target_ratio) < 0.01 else "fill"
+    elif layout == "blur":
+        mode = "fill"
     else:
-        writer_w, writer_h = base_out_w, base_out_h
-
-    writer = open_ffmpeg_video_writer(
-        output_video, writer_w, writer_h, orig_fps, video_encoder
-    )
-
-    TRANSITION_DUR = 0.3
-    MAX_ZOOM = 1.10
+        mode = "crop"
 
     try:
-        cap.set(cv2.CAP_PROP_POS_MSEC, start_clip * 1000)
-        frame_count = 0
+        if mode == "crop" and static:
+            print(f"🧠 {label} - Static crop enabled (no face tracking)...", flush=True)
+        elif mode == "crop":
+            print(f"🧠 {label} - Face analysis started...", flush=True)
+            meter = get_mouth_meter(cfg) if getattr(cfg, "speaker_tracking", True) else None
+            samples = _analyse_faces(
+                cap, fps, start_clip, duration, step, _face_detector_fn(cfg), meter, label
+            )
+            face_share = sum(1 for s in samples if s["boxes"]) / len(samples) if samples else 0.0
 
-        print(f"🎬 {label} - Frame render started...", flush=True)
-        render_bar = ProgressBar(duration, f"{label} - Rendering")
-
-        while True:
-            ret, main_frame = cap.read()
-            if not ret:
-                break
-
-            t = frame_count / orig_fps
-            if t > duration:
-                break
-
-            absolute_time = start_clip + t
-
-            # --- 1. ALWAYS CREATE CROPPED OUTPUT ---
-            if _is_vertical_ratio(ratio):
-                # Vertical/square ratios: face-tracked crop
-                cx_base, cy_base = _get_pos(t)
-                x1_crop = int(max(0, min(cx_base - crop_w // 2, width - crop_w)))
-                y1_crop = int(max(0, min(cy_base - crop_h // 2, height - crop_h)))
-                cropped = main_frame[y1_crop : y1_crop + crop_h, x1_crop : x1_crop + crop_w]
-                frame_normal = _resize_frame(cropped, (base_out_w, base_out_h))
+            if layout == "auto" and samples and face_share < MIN_FACE_SHARE:
+                print(
+                    f"   🖼️ {label} - Faces in only {face_share:.0%} of the clip; "
+                    "fitting the whole frame over a blurred background."
+                )
+                mode = "fill"
             else:
-                # 16:9 landscape: fit-to-height with letterbox (no stretch)
-                cx_base, cy_base = default_cx, default_cy
-                src_h, src_w = main_frame.shape[:2]
-                src_ratio = src_w / src_h
-                out_ratio = base_out_w / base_out_h
+                if meter is not None and any(len(s["boxes"]) >= 2 for s in samples):
+                    print(f"   🗣️ {label} - Several people in frame; following whoever is talking.")
+                chosen = select_speaker_faces(samples, width, step)
+                smooth = _camera_path(
+                    samples, chosen, crop_w, step, deadzone_ratio, smooth_factor, snap_px
+                )
 
-                if abs(src_ratio - out_ratio) < 0.01:
-                    # Source already matches target ratio — direct resize
-                    frame_normal = _resize_frame(main_frame, (base_out_w, base_out_h))
-                else:
-                    # Fit source into target canvas, maintaining aspect ratio
-                    frame_normal = np.zeros((base_out_h, base_out_w, 3), dtype=np.uint8)
-                    if src_ratio > out_ratio:
-                        # Source is wider — fit to width, pad top/bottom
-                        fit_w = base_out_w
-                        fit_h = int(base_out_w / src_ratio)
-                        if fit_h % 2 != 0:
-                            fit_h += 1
-                        resized = _resize_frame(main_frame, (fit_w, fit_h))
-                        y_off = (base_out_h - fit_h) // 2
-                        frame_normal[y_off : y_off + fit_h, :] = resized
-                    else:
-                        # Source is taller (e.g. 9:16 source) — fit to height, pad left/right
-                        fit_h = base_out_h
-                        fit_w = int(base_out_h * src_ratio)
-                        if fit_w % 2 != 0:
-                            fit_w += 1
-                        resized = _resize_frame(main_frame, (fit_w, fit_h))
-                        x_off = (base_out_w - fit_w) // 2
-                        frame_normal[:, x_off : x_off + fit_w] = resized
+        position = _position_fn(smooth, snap_px, (width / 2, height / 2))
 
-            # Base target for filtering (e.g. B-Roll applies to the normal output)
-            selected_frame = frame_normal
+        def origin_at(t):
+            if not smooth:
+                return (width - crop_w) // 2, (height - crop_h) // 2
+            cx, cy = position(t)
+            x = int(max(0, min(cx - crop_w / 2, width - crop_w)))
+            y = int(max(0, min(cy - crop_h * FACE_VERTICAL_ANCHOR, height - crop_h)))
+            return x, y
 
-            # --- 2. CREATE DEV CONTEXT FRAME IF ACTIVE ---
-            frame_dev = None
-            if dev_visualize and _is_vertical_ratio(ratio):
-                frame_base = _resize_frame(main_frame, (1920, 1080))
-                frame_dev = (frame_base * 0.35).astype(np.uint8)
-                
-                scale_x = 1920 / width
-                scale_y = 1080 / height
-                
-                cx_dev = int(cx_base * scale_x)
-                cy_dev = int(cy_base * scale_y)
-                cw_dev = int(crop_w * scale_x)
-                ch_dev = int(crop_h * scale_y)
-                
-                x1 = int(max(0, min(cx_dev - cw_dev // 2, 1920 - cw_dev)))
-                y1_dev = int(max(0, min(cy_dev - ch_dev // 2, 1080 - ch_dev)))
-                
-                # Bright focal crop
-                frame_dev[y1_dev : y1_dev + ch_dev, x1 : x1 + cw_dev] = frame_base[y1_dev : y1_dev + ch_dev, x1 : x1 + cw_dev]
-                
-                # Frame borders
-                cv2.rectangle(frame_dev, (x1, y1_dev), (x1+cw_dev, y1_dev+ch_dev), (255, 255, 255), 2)
-                
-                # Face tracking box & target lines
-                if cfg.box_face_detection or cfg.track_lines or True:
-                    box = get_box(t)
-                    if box:
-                        bx1, by1 = int(box[0] * scale_x), int(box[1] * scale_y)
-                        bx2, by2 = int(box[2] * scale_x), int(box[3] * scale_y)
-                        cv2.rectangle(frame_dev, (bx1, by1), (bx2, by2), (0, 255, 255), 2)
-                        
-                        if cfg.track_lines or cfg.dev_mode:
-                            mid_x = (bx1 + bx2) // 2
-                            mid_y = (by1 + by2) // 2
-                            cv2.line(frame_dev, (x1, mid_y), (bx1, mid_y), (0, 255, 255), 2)
-                            cv2.line(frame_dev, (bx2, mid_y), (x1 + cw_dev, mid_y), (0, 255, 255), 2)
-                            cv2.line(frame_dev, (mid_x, y1_dev), (mid_x, by1), (0, 255, 255), 2)
-                            cv2.line(frame_dev, (mid_x, by2), (mid_x, y1_dev + ch_dev), (0, 255, 255), 2)
-                
-                # Dev UI HUD Text
+        has_broll = any(
+            os.path.exists(br.get("filepath", ""))
+            and br["end_time"] > start_clip and br["start_time"] < end_clip
+            for br in broll_data
+        )
+        fast = (
+            not has_broll
+            and not getattr(cfg, "watermark_enabled", False)
+            and video_encoder["name"] != "h264_vaapi"
+        )
 
-                hud_lines = [
-                    f"MODE: HYBRID STANDARD (DEV)",
-                    f"TIME: {format_seconds(t)}",
-                    f"LAYOUT: FULL {ratio}",
-                    f"ANCHOR CX: {int(cx_base)}"
-                ]
-                for i, line in enumerate(hud_lines):
-                    cv2.putText(frame_dev, line, (40, 60 + i*35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-
-            # --- 3. B-ROLL OVERLAY OVER NORMAL FRAME ---
-            for bc in broll_caps:
-                if bc["start"] <= absolute_time <= bc["end"]:
-                    elapsed_broll = absolute_time - bc["start"]
-                    bc["cap"].set(cv2.CAP_PROP_POS_MSEC, elapsed_broll * 1000)
-                    ret_b, frame_b = bc["cap"].read()
-
-                    if ret_b:
-                        total_broll_duration = bc["end"] - bc["start"]
-                        progress_broll = elapsed_broll / total_broll_duration if total_broll_duration > 0 else 0
-                        zoom_factor = 1.0 + ((MAX_ZOOM - 1.0) * progress_broll)
-
-                        frame_b_crop = crop_center_broll(frame_b, base_out_w, base_out_h)
-                        M = cv2.getRotationMatrix2D((base_out_w / 2, base_out_h / 2), 0, zoom_factor)
-                        frame_b_zoomed = cv2.warpAffine(frame_b_crop, M, (base_out_w, base_out_h))
-
-                        alpha = 1.0
-                        if elapsed_broll < TRANSITION_DUR:
-                            alpha = elapsed_broll / TRANSITION_DUR
-                        elif (bc["end"] - absolute_time) < TRANSITION_DUR:
-                            alpha = (bc["end"] - absolute_time) / TRANSITION_DUR
-
-                        if alpha >= 1.0:
-                            selected_frame = frame_b_zoomed
-                        else:
-                            selected_frame = cv2.addWeighted(frame_b_zoomed, alpha, selected_frame, 1.0 - alpha, 0)
-                    break
-
-            # --- 4. WATERMARK OVERLAY ---
-            if getattr(cfg, "watermark_enabled", False):
-                selected_frame = apply_watermark(selected_frame, cfg)
-
-            # --- 5. OUTPUT WRITING AND MERGING ---
-            if merge_output:
-                frm_normal_small = _resize_frame(selected_frame, (608, 1080))
-                frm_merged = np.full((1220, 2648, 3), 30, dtype=np.uint8)
-                
-                cv2.putText(frm_merged, "DIRECTOR'S CONSOLE (16:9 RAW)", (40, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
-                cv2.putText(frm_merged, "FINAL OUTPUT (9:16 CROP)", (2000, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
-                
-                cv2.rectangle(frm_merged, (38, 98), (40+1920+2, 100+1080+2), (255, 255, 255), 4)
-                cv2.rectangle(frm_merged, (1998, 98), (2000+608+2, 100+1080+2), (255, 255, 255), 4)
-                
-                frm_merged[100:1180, 40:1960] = frame_dev
-                frm_merged[100:1180, 2000:2608] = frm_normal_small
-                
-                writer.stdin.write(frm_merged.tobytes())
-            elif dev_visualize:
-                writer.stdin.write(frame_dev.tobytes())
-            else:
-                writer.stdin.write(selected_frame.tobytes())
-            frame_count += 1
-
-            render_bar.update(t)
-
-        render_bar.close()
-        writer.stdin.close()
-        stderr_data = writer.stderr.read().decode("utf-8", errors="ignore")
-        return_code = writer.wait()
-
-        if return_code != 0:
-            raise RuntimeError(f"The FFmpeg writer failed: {stderr_data[-1000:]}")
+        rendered = fast and _render_with_ffmpeg(
+            input_video, output_video, start_clip, duration, fps, mode, out_dims,
+            (crop_w, crop_h), origin_at, bool(smooth), cfg, video_encoder, label,
+        )
+        if not rendered:
+            if fast:
+                print(f"   ↩️ {label} - Falling back to frame-by-frame rendering.")
+            _render_with_opencv(
+                cap, output_video, start_clip, duration, fps, mode, out_dims,
+                (crop_w, crop_h), origin_at, broll_data, cfg, video_encoder, label,
+            )
 
         print(f"✅ {label} done.", flush=True)
-
     finally:
         cap.release()
-        for bc in broll_caps:
-            bc["cap"].release()
-            
+
+    def get_x(t):
+        return position(t)[0]
+
     return get_x
-
-

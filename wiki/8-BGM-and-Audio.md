@@ -86,13 +86,15 @@ assets/
 
 ## Technical Details
 
-- Base BGM volume: `0.25` (25% of original volume)
+- Base BGM volume: `0.12` (`--bgm-volume`), so the music sits under the voice
+- Your own music folder: `--bgm-dir /path/with/mood/subfolders`
 - Ducking mode uses FFmpeg's `sidechaincompress` filter
+- Every clip is loudness-normalised to −14 LUFS (the level Shorts, Reels and TikTok play at)
 - BGM is applied **after** segment trimming (if enabled) to ensure seamless audio across cuts
 
 ---
 
 ## See Also
 
-- [CLI Reference](CLI-Reference) — `--bgm-mode`, `--no-bgm`
-- [Hook V2 & Segment Trimming](Hook-V2-and-Segment-Trimming) — How BGM interacts with trimming
+- [CLI Reference](CLI-Reference) — `--bgm-mode`, `--bgm-dir`, `--bgm-volume`, `--no-bgm`
+- [Segment Trimming & Hook Teaser](Segment-Trimming-and-Hook-Teaser) — How BGM interacts with trimming

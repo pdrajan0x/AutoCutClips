@@ -9,12 +9,14 @@ For narrative explanations of each feature, see the numbered pages in this wiki
 | Command | What it runs |
 | --- | --- |
 | `clipping` / `python -m app.cli` | Auto-clip pipeline; switches to Story Clip mode with `--story-mode` |
+| `python -m app.cli queue` | Clip pipeline over every URL in a links file |
 | `clipping-upload-youtube` / `python -m app.cli upload-youtube` | YouTube upload & scheduling |
 | `clipping-upload-instagram` / `python -m app.cli upload-instagram` | Instagram Reels publishing |
 | `clipping-reschedule-youtube` / `python -m app.cli reschedule-youtube` | Re-space already-scheduled YouTube videos |
 | `clipping-youtube-token` / `python -m app.cli youtube-token` | Create / verify the YouTube OAuth token |
+| `clipping-learn-youtube` / `python -m app.cli learn-youtube` | Fetch views for uploaded clips (channel learning) |
 | `clipping-tracker` / `python -m app.tracker.server` | YouTube performance tracker (no flags; see env vars) |
-| `uvicorn app.web.api.app:app` | Web API backend for the dashboard |
+| `uvicorn app.web.api.app:app` | Web API backend for the Studio pages |
 
 ---
 
@@ -24,41 +26,42 @@ For narrative explanations of each feature, see the numbered pages in this wiki
 | --- | --- | --- |
 | `--url`, `-u` | str, `None` | Video URL to process (YouTube, TikTok, Instagram, Google Drive). Required unless `--story-mode`. |
 | `--source` | `youtube` \| `tiktok` \| `instagram` \| `gdrive`, default `youtube` | Source platform; decides download behaviour and subtitle availability. |
+| `--cookies` | str, `None` | Netscape `cookies.txt` for yt-dlp; fixes YouTube's "Sign in to confirm you're not a bot" on Colab/Kaggle. Also read from `$YTDLP_COOKIES_FILE`. |
 | `--tiktok` | flag, `False` | **Deprecated** — use `--source tiktok`. |
-| `--clips`, `-n` | int, `7` | Number of highlight clips to generate. |
+| `--clips`, `-n` | int, `7` | Maximum number of clips to generate. |
 | `--ratio`, `-r` | `9:16` \| `16:9` \| `1:1` \| `3:4` \| `4:5`, default `9:16` | Output aspect ratio. |
+| `--min-duration` | float, `30` | Shortest clip length, in seconds. |
+| `--max-duration` | float, `80` | Longest clip length, in seconds (5-180; `min` must be below `max`). |
 | `--source-height` | `max` or int, default `max` | Max source download height; `max` fetches the highest available quality. |
 | `--render-height` | str, `1080` | Target output height; `source` matches the source video, or give a number (1080, 1440). |
-| `--load-gemini-json` | flag, `False` | Reuse the saved `gemini_response.json` and skip the AI step (for debugging). |
-| `--target-accounts` | str, `target_accounts.json` | Path to the JSON routing table the AI uses to assign each clip to a publishing account. Built-in English defaults are used when the file is absent. |
-| `--no-account-routing` | flag, `False` | Disable account classification entirely; the AI then spends its effort on clip selection and metadata only. |
+| `--load-gemini-json` | flag, `False` | Reuse the saved `gemini_response.json` and skip the AI step. |
+| `--target-accounts` | str, `target_accounts.json` | JSON routing table the AI uses to assign each clip to a publishing account. |
+| `--no-account-routing` | flag, `False` | Disable account classification entirely. |
+| `--performance-file` | str, `outputs/channel_performance.json` | Channel results from `learn-youtube`; the AI is shown the best and weakest clips. |
+| `--no-channel-learning` | flag, `False` | Don't show the AI how earlier clips performed. |
 
 ## Rendering / Studio Effects
 
 | Argument | Type / Default | Description |
 | --- | --- | --- |
 | `--no-broll` | flag, `False` | Disable B-roll footage. |
-| `--no-hook` | flag, `False` | Disable the hook glitch teaser. |
+| `--hook-teaser` | flag, `False` | Open with a flash-forward to the clip's peak line, then a clean cut to the clip. |
 | `--hook-duration` | int, `3` | Hook teaser duration in seconds. |
-| `--hook-source` | str, `None` | Google Drive URL or local path to a single custom hook video (`.mp4`). |
+| `--hook-source` | str, `None` | Google Drive URL or local path to a custom hook video (`.mp4`), played as the teaser. |
 | `--hook-source-start` | float, `0.0` | Start time in seconds inside the custom hook video. |
-| `--edge-glow` | flag, `False` | Ambient edge glow across the whole clip; without it, glow appears only on the voice-over intro. |
-| `--edge-glow-mode` | `default` \| `smooth` \| `full`, default `smooth` | Glow strategy: `default` 10s loop, `smooth` 10s loop with seamless speed, `full` whole-duration render. |
+| `--layout` | `auto` \| `crop` \| `blur`, default `auto` | Vertical framing: face-tracked crop, blurred-background fill for faceless clips, or always one of them. |
+| `--no-speaker-tracking` | flag, `False` | With several people in frame, follow faces by position instead of by who is talking. |
 | `--video-bitrate` | str, `auto` | Target bitrate (e.g. `8M`, `12M`); `auto` scales with resolution. |
 | `--video-sharpen` | flag, `False` | Apply a subtle sharpening filter. |
 | `--video-cq` | int, `23` | NVENC constant-quality value (lower = sharper, bigger file). |
 | `--video-crf` | int, `20` | libx264 CRF value (lower = sharper, bigger file). |
-| `--video-preset` | str, `auto` | Override the NVENC/libx264 preset, or `auto` to keep the defaults. |
-| `--video-scale-algo` | `lanczos` \| `bicubic` \| `bilinear` \| `area`, default `lanczos` | OpenCV resize algorithm used during rendering. |
+| `--video-preset` | str, `auto` | Override the NVENC/libx264 preset, or `auto` (NVENC `p4`, x264 `veryfast`). |
+| `--video-scale-algo` | `lanczos` \| `bicubic` \| `bilinear` \| `area`, default `lanczos` | Resize algorithm used during rendering. |
 
-### Hook V2 & segment trimming
+### Segment trimming
 
 | Argument | Type / Default | Description |
 | --- | --- | --- |
-| `--hook-v2` | flag, `False` | Enable Multi-Hook Intro V2 (3-4 micro-hooks with flash/glitch transitions). |
-| `--hook-v2-items` | int, `3` | Number of micro-hooks to generate in V2 mode. |
-| `--hook-v2-style` | str, `controversial_fast_glitch` | Style hint given to the AI when picking the hook style. |
-| `--white-flash-duration` | float, `0.12` | Duration of the white-flash transition between hooks, in seconds. |
 | `--no-segment-trim` | flag, `False` | Disable AI segment trimming (render full start-to-end instead of `keep_segments`). |
 | `--silence-trim` | flag, `False` | Tell the AI to aggressively trim silence and dead air. |
 
@@ -67,12 +70,15 @@ For narrative explanations of each feature, see the numbered pages in this wiki
 | Argument | Type / Default | Description |
 | --- | --- | --- |
 | `--no-subs` | flag, `False` | Disable all subtitle rendering. |
-| `--words-per-sub` | int, `5` | Max words per karaoke subtitle group. |
-| `--no-karaoke` | flag, `False` | Disable the karaoke highlight effect (use clean text instead). |
-| `--font-style` | `DEFAULT` \| `STORYTELLER` \| `HORMOZI` \| `CINEMATIC`, default `HORMOZI` | Font style preset. |
-| `--advanced-text` | flag, `False` | Enable advanced kinetic typography. |
-| `--advanced-text-hook` | flag, `False` | Enable advanced typography on the hook. |
-| `--use-dlp-subs` | flag, `False` | Fetch YouTube auto/manual subtitles with yt-dlp and skip Whisper when found. |
+| `--words-per-sub` | int, `3` | Max words per caption group. |
+| `--no-karaoke` | flag, `False` | No spoken-word highlight. |
+| `--font-style` | `DEFAULT` \| `STORYTELLER` \| `HORMOZI` \| `CINEMATIC`, default `DEFAULT` | Font style preset. |
+| `--caption-case` | `normal` \| `upper`, default `normal` | UPPERCASE captions with `upper`. |
+| `--simple-captions` | flag, `False` | Plain one-line karaoke captions instead of the kinetic style. |
+| `--no-title-overlay` | flag, `False` | Disable the AI headline at the top of the frame. |
+| `--language` | str, `auto` | Spoken language code for transcription; `auto` uses YouTube's language, then Whisper detection. |
+| `--caption-script` | `latin` \| `native`, default `latin` | `latin` writes non-Latin speech in English letters (never translated); `native` keeps the script. |
+| `--use-dlp-subs` | flag, `False` | Use YouTube's subtitles in the spoken language and skip Whisper when found. |
 | `--whisper-model` | str, `large-v3` | Faster-Whisper model size. |
 | `--whisper-device` | `cuda` \| `cpu` \| `auto`, default `cuda` | Device used for Whisper inference. |
 | `--whisper-compute-type` | str, `float16` | Whisper compute type (`float16`, `int8`, ...). |
@@ -83,6 +89,8 @@ For narrative explanations of each feature, see the numbered pages in this wiki
 | --- | --- | --- |
 | `--no-bgm` | flag, `False` | Disable background music. |
 | `--bgm-mode` | `ducking` \| `background`, default `ducking` | `ducking` sidechain-compresses BGM under speech; `background` mixes it at a constant low volume. |
+| `--bgm-dir` | str, `assets/bgm` | Folder with `chill/ epic/ sad/ upbeat/ suspense/` subfolders. |
+| `--bgm-volume` | float, `0.12` | Music volume before ducking. |
 
 ### Voice-over commentary (TTS)
 
@@ -107,23 +115,18 @@ For narrative explanations of each feature, see the numbered pages in this wiki
 | `--track-deadzone` | float, `None` (0.15) | Camera deadzone ratio. |
 | `--track-smooth` | float, `None` (0.30) | Camera smoothing speed. |
 | `--track-jitter` | int, `None` (5) | Pixel jitter threshold. |
-| `--track-snap` | float, `None` (0.25) | Face-jump snap threshold. |
-| `--track-conf` | float, `0.55` | *Experimental.* Detection confidence threshold, to suppress ghost faces. |
+| `--track-snap` | float, `None` (0.08) | Face-jump threshold (fraction of frame width) that counts as a cut. |
+| `--track-conf` | float, `0.55` | *Experimental.* Detection confidence threshold, to suppress ghost faces (split-screen). |
 | `--track-smooth-window` | int, `12` | *Experimental.* Majority-vote window (frames) for layout stability. |
 | `--scene-cut-threshold` | int, `18` | *Experimental.* Visibility change that counts as a camera cut and resets layout history. |
 | `--track-iou-threshold` | float, `0.2` | *Experimental.* Box-overlap threshold for merging duplicate detections. |
-| `--box-face-detection` | flag, `False` | Draw a yellow bounding box around the detected face (debugging). |
-| `--track-lines` | flag, `False` | Draw crosshair tracking lines from the face box to the frame edges. |
-| `--dev-mode` | flag, `False` | Developer visualisation for 9:16 tracking (stabilisation box, dimmed background). |
-| `--dev-mode-with-output` | flag, `False` | Render both the dev-mode visualisation and the normal output. |
-| `--dev-mode-with-output-merge` | flag, `False` | Render a merged side-by-side dev-mode + normal output video. |
 
 ### Podcast modes (split-screen & camera-switch)
 
 | Argument | Type / Default | Description |
 | --- | --- | --- |
-| `--split-screen` | flag, `False` | Split-screen mode for 2+ speaker podcasts. Works on any vertical/square ratio (`9:16`, `1:1`, `3:4`, `4:5`); `--split-trigger diarization` needs `HF_TOKEN` for Pyannote, `--split-trigger face` does not. |
-| `--camera-switch` | flag, `False` | Camera-switch mode. Works on any vertical/square ratio (`9:16`, `1:1`, `3:4`, `4:5`); needs `HF_TOKEN`. `--split-screen` wins if both are set. |
+| `--split-screen` | flag, `False` | Split-screen mode for 2+ speaker podcasts. Works on any vertical/square ratio; `--split-trigger diarization` needs `HF_TOKEN`, `--split-trigger face` does not. |
+| `--camera-switch` | flag, `False` | Diarization-based camera-switch mode. Works on any vertical/square ratio; needs `HF_TOKEN`. `--split-screen` wins if both are set. |
 | `--diarization-speakers` | int or `auto`, default `auto` | Speaker count for diarization, or `auto` to detect visually. |
 | `--split-trigger` | `diarization` \| `face`, default `diarization` | What decides when to split: audio (who is talking) or video (how many faces). |
 | `--dynamic-split` | flag, `False` | Switch between full-screen (1 speaker) and split-screen (2 speakers) automatically. Needs `--split-screen`. |
@@ -171,6 +174,16 @@ apply (the recipe's `default_settings.ratio` is used only when `--ratio` is
 absent); the Studio effect flags do not, because story clips are assembled
 clean, with no subtitles or overlays.
 
+## Video Queue
+
+`python -m app.cli queue` — every other clip flag above is applied to each video.
+
+| Argument | Type / Default | Description |
+| --- | --- | --- |
+| `--links` | str, required | Text file with one video URL per line (`#` comments allowed). |
+| `--retry-failed` | flag, `False` | Re-run videos that failed last time, reusing their download, transcript and AI selection. |
+| `--keep-source` | flag, `False` | Keep each downloaded source video after its clips render. |
+
 ## YouTube Upload & Scheduling
 
 `clipping-upload-youtube`:
@@ -178,9 +191,9 @@ clean, with no subtitles or overlays.
 | Argument | Type / Default | Description |
 | --- | --- | --- |
 | `--token-file` | str, `.credentials/youtube_token.json` | YouTube OAuth token JSON. |
-| `--manifest-file` | str, `outputs/render_manifest.json` | Input manifest from the clipping pipeline. |
+| `--manifest-file` | str, `outputs/render_manifest.json` | Input manifest from the clipping pipeline (or `outputs/queue/queue_manifest.json`). |
 | `--result-file` | str, `outputs/youtube_upload_results.json` | Output JSON trace of the upload responses. |
-| `--updated-manifest` | str, `outputs/render_manifest_uploaded.json` | Output manifest enriched with the upload results. |
+| `--updated-manifest` | str, `outputs/render_manifest_uploaded.json` | Output manifest enriched with the upload results; also read to skip clips already uploaded. |
 | `--tz-name` | str, `$APP_TIMEZONE` or `Asia/Kolkata` | Timezone used for scheduling (IANA name). |
 | `--interval-hours` | int, `24` | Gap between scheduled publishes; the safety config enforces a minimum. |
 | `--start-local` | str, `None` | Manual first publish time (`YYYY-MM-DD HH:MM`), bypassing queue detection. |
@@ -191,6 +204,15 @@ clean, with no subtitles or overlays.
 `upload_safety.json` keys (not CLI flags, but they gate this command):
 `max_upload_per_day`, `max_upload_per_run`, `interval_hours_min`,
 `max_scheduled_queue`, `require_manual_approval`, `upload_log_file`.
+
+`clipping-learn-youtube`:
+
+| Argument | Type / Default | Description |
+| --- | --- | --- |
+| `--token-file` | str, `.credentials/youtube_token.json` | YouTube OAuth token JSON (the upload token works). |
+| `--history-file` | str, `None` | Upload history; defaults to `upload_log_file` from the safety config. |
+| `--safety-config` | str, `upload_safety.json` | Safety config that names the upload history file. |
+| `--output` | str, `outputs/channel_performance.json` | Where to save the results (clip runs read this path by default). |
 
 `clipping-reschedule-youtube`:
 
@@ -209,9 +231,10 @@ clean, with no subtitles or overlays.
 
 | Argument | Type / Default | Description |
 | --- | --- | --- |
-| `command` | `generate` \| `verify` (positional, required) | `generate` runs the OAuth browser login; `verify` refreshes the token and prints the channel. |
+| `command` | `generate` \| `verify` (positional, required) | `generate` runs the OAuth login; `verify` refreshes the token and prints the channel. |
 | `--token-file` | str, `.credentials/youtube_token.json` | Token file to write or verify. |
 | `--client-secret` | str, `.credentials/client_secret.json` | Google OAuth client-secret JSON (`generate` only). |
+| `--manual` | flag, `False` | No local browser (Colab/Kaggle/SSH): print a login link and paste the redirected URL back. |
 
 ## Instagram Upload
 
@@ -242,26 +265,31 @@ The Instagram Graph API has **no** scheduled-publish parameter, so the interval
 is enforced locally: run the command repeatedly (e.g. from cron) and each run
 publishes the clips whose slot has arrived.
 
-## Web API / Dashboard config
+## Web API / Studio config
 
-The backend and dashboard take no CLI flags of their own — they are configured
-by environment variables and the `PUT /api/settings` endpoint.
+The backend takes no CLI flags of its own — it is configured by environment
+variables and the `PUT /api/settings` endpoint. Job requests accept the same
+settings as the CLI (`clips`, `ratio`, `min_duration`, `max_duration`,
+`hook_teaser`, `layout`, `speaker_tracking`, `caption_case`, `title_overlay`,
+`language`, `caption_script`, ...); any field left out uses the CLI default.
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `GOOGLE_API_KEY` | — | Gemini API key (required for the clipping pipeline). |
 | `NVIDIA_API_KEY` | — | NVIDIA NIM API key (only for `--ai-provider nvidia`). |
 | `PEXELS_API_KEY` | — | Pexels key used to fetch B-roll. |
-| `HF_TOKEN` | — | HuggingFace token, required by Pyannote for the podcast modes. |
+| `HF_TOKEN` | — | HuggingFace token, required by Pyannote for the diarization podcast modes. |
+| `YTDLP_COOKIES_FILE` | — | Cookies file for YouTube downloads. |
 | `MAX_CONCURRENT_JOBS` | `1` | Maximum jobs the web worker runs at once. |
+| `STUDIO_ALLOWED_ORIGINS` | — | Extra CORS origins (comma-separated) for your own Studio host. |
 | `APP_TIMEZONE` | `Asia/Kolkata` | Default timezone for the uploaders. |
-| `OSC_VIDEO_SCALE_ALGO` | `lanczos` | Fallback for the OpenCV scaling algorithm (normally set from `--video-scale-algo`). |
+| `OSC_VIDEO_SCALE_ALGO` | `lanczos` | Fallback for the scaling algorithm (normally set from `--video-scale-algo`). |
 
 Settings writable through the API (`PUT /api/settings`): `google_api_key`,
 `pexels_api_key`, `hf_token`, `nvidia_api_key`, `default_clips`,
 `default_ratio`, `default_font_style`, `default_whisper_model`,
 `default_whisper_device`, `default_ai_provider`.
 
-Serve the backend with `uvicorn app.web.api.app:app --host 0.0.0.0 --port 8000`;
-the dashboard dev server proxies `/api` to it (see
-`app/web/dashboard/vite.config.js`).
+Serve the backend with `uvicorn app.web.api.app:app --host 0.0.0.0 --port 8000`
+and open the static Studio pages from GitHub Pages, or locally with
+`python -m http.server 8080 --directory docs`.

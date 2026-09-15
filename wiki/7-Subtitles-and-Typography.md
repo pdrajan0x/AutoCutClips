@@ -1,159 +1,132 @@
 # 📝 Subtitles & Typography
 
-AutoCutClips generates word-by-word karaoke-style subtitles using the `.ASS` subtitle format, with support for kinetic typography and multiple font presets.
+AutoCutClips burns word-by-word captions into every clip using the `.ASS` subtitle format, plus a short headline at
+the top of the frame for viewers watching with the sound off.
 
 ---
 
 ## Subtitle System Overview
 
-The subtitle pipeline works as follows:
+1. **Transcription** — Faster-Whisper produces word-level timestamps, in the language actually spoken
+2. **Grouping** — words are grouped into caption chunks (default: 3 words)
+3. **Script** — speech in a non-Latin script is written in English letters (see *Language* below)
+4. **ASS generation** — each word is positioned and animated
+5. **Rendering** — captions are burned into the video with FFmpeg
 
-1. **Transcription** — Faster-Whisper generates word-level timestamps
-2. **Grouping** — Words are grouped into subtitle chunks (default: 5 words per group)
-3. **ASS Generation** — `.ASS` subtitle file is created with karaoke timing
-4. **Rendering** — Subtitles are burned into the video via FFmpeg
+---
+
+## The Default Look
+
+- **Heavy font with a thick outline** — `DEFAULT` preset (Montserrat Black), readable over any background
+- **Spoken-word highlight** — the word being said pops slightly and turns gold
+- **Keywords** — the 3-6 words Gemini marks as the heaviest stay gold and larger for the whole group
+- **Headline overlay** — a 3-7 word hook in a dark box near the top for the first 4 seconds
+
+| Flag | Effect |
+|---|---|
+| `--caption-case upper` | UPPERCASE captions |
+| `--simple-captions` | Plain one-line captions with a karaoke colour change instead of the kinetic style |
+| `--no-karaoke` | No spoken-word highlight |
+| `--no-title-overlay` | No headline at the top |
+| `--no-subs` | No captions at all |
+
+```bash
+# Bold uppercase captions
+python -m app.cli --url "VIDEO_URL" --caption-case upper
+
+# Plain captions, no headline
+python -m app.cli --url "VIDEO_URL" --simple-captions --no-title-overlay
+```
 
 ---
 
 ## Font Styles
 
-Four preset font styles are available:
-
 | Style | Main Font | Emphasis Font | Best For |
 |---|---|---|---|
-| `HORMOZI` (default) | Montserrat | Anton | Business / motivational content |
+| `DEFAULT` (default) | Montserrat Black | Montserrat Medium | General purpose — the heaviest, most readable |
+| `HORMOZI` | Montserrat | Anton | Business / motivational content |
 | `STORYTELLER` | Inter | Lora | Narrative / storytelling |
 | `CINEMATIC` | Roboto | Bebas Neue | Film / dramatic content |
-| `DEFAULT` | Montserrat Black | Montserrat Medium | General purpose |
 
 ```bash
-# Use Cinematic style
 python -m app.cli --url "VIDEO_URL" --font-style CINEMATIC
-
-# Use Storyteller style
-python -m app.cli --url "VIDEO_URL" --font-style STORYTELLER
 ```
 
-> **Note:** All fonts are auto-downloaded on first run. No manual font installation is needed.
+> All fonts are auto-downloaded on first run.
 
 ---
 
-## Karaoke Effect
-
-By default, subtitles use a **karaoke highlight effect** where each word lights up (changes color) as it's spoken — similar to the style popularized by Alex Hormozi and Veed.io.
+## Words Per Caption
 
 ```bash
-# Default: karaoke highlight enabled
-python -m app.cli --url "VIDEO_URL"
-
-# Disable karaoke (use clean text instead)
-python -m app.cli --url "VIDEO_URL" --no-karaoke
-
-# Disable all subtitles
-python -m app.cli --url "VIDEO_URL" --no-subs
-```
-
----
-
-## Words Per Subtitle
-
-Control how many words appear on screen at once:
-
-```bash
-# Default: 5 words per subtitle group
-python -m app.cli --url "VIDEO_URL" --words-per-sub 5
-
-# Fewer words (faster reading, more subtitle changes)
+# Default: 3 words per caption group
 python -m app.cli --url "VIDEO_URL" --words-per-sub 3
 
-# More words (slower reading, fewer changes)
-python -m app.cli --url "VIDEO_URL" --words-per-sub 7
+# Longer groups (slower reading, fewer changes)
+python -m app.cli --url "VIDEO_URL" --words-per-sub 5
 ```
+
+Two to four words keeps the text in step with the speaker; longer groups make viewers read ahead.
 
 ---
 
-## Kinetic Typography
+## Language
 
-Advanced text animation with bounce/stagger effects and word scaling:
+Captions are never translated.
 
-```bash
-# Enable kinetic typography on main clip
-python -m app.cli --url "VIDEO_URL" --advanced-text
+- **English speech** → English captions.
+- **Latin-script languages** (Spanish, Indonesian, Hinglish typed in English letters) → captions as spoken.
+- **Non-Latin scripts** (Hindi, Tamil, Arabic, Russian, ...) → the same words written in English letters, the way
+  people type them online: *"namaste, mera naam priyadarshani rajan hai"*. The headline follows the same rule.
 
-# Enable kinetic typography on hook teaser only
-python -m app.cli --url "VIDEO_URL" --advanced-text-hook
+| Flag | Effect |
+|---|---|
+| `--language auto` (default) | Use the language YouTube reports, else Whisper's detection |
+| `--language hi` | Force the spoken language (any Whisper language code) |
+| `--caption-script native` | Keep the original script (needs a caption font that supports it) |
 
-# Enable on both
-python -m app.cli --url "VIDEO_URL" --advanced-text --advanced-text-hook
-```
-
-### What Kinetic Typography Does
-
-- **Word Scaling** — Emphasis words appear larger with a bounce animation
-- **Dual-Font System** — Important words use the emphasis font, regular words use the main font
-- **Stagger Animation** — Words appear sequentially with slight delays
+Titles, descriptions and hashtags stay in English.
 
 ---
 
 ## Subtitle Positioning
 
-Subtitle position is automatically adjusted based on the output aspect ratio:
-
 | Ratio | Alignment | Margin | Font Size |
 |---|---|---|---|
-| `9:16` (Vertical) | Bottom-center | 450px from bottom | 90pt |
-| `16:9` (Landscape) | Bottom-center | 70px from bottom | 80pt |
-| Split-Screen | Centered vertically | Auto-adjusted | Scaled |
+| `9:16` (Vertical) | Bottom-center | 450px from bottom (clear of the Shorts/Reels UI) | 90px |
+| `16:9` (Landscape) | Bottom-center | 70px from bottom | 80px |
+
+Sizes are defined for 1080×1920 / 1920×1080 and scale with `--render-height`.
 
 ---
 
 ## Transcription Options
 
-### Whisper Settings
-
 ```bash
-# Use a smaller/faster model
+# Smaller/faster model
 python -m app.cli --url "VIDEO_URL" --whisper-model medium
 
-# Force CPU (if no CUDA GPU)
+# Force CPU (no CUDA GPU)
 python -m app.cli --url "VIDEO_URL" --whisper-device cpu
 
-# Use int8 for lower VRAM usage
+# Lower VRAM usage
 python -m app.cli --url "VIDEO_URL" --whisper-compute-type int8
 
-# Use float32 for Kaggle compatibility
+# Kaggle compatibility
 python -m app.cli --url "VIDEO_URL" --whisper-compute-type float32
 ```
 
-### YouTube Built-in Subtitles
+Whisper runs with voice-activity filtering, so music and silence don't produce invented captions.
 
-Skip Whisper entirely by using YouTube's own subtitles:
+### YouTube Built-in Subtitles
 
 ```bash
 python -m app.cli --url "VIDEO_URL" --use-dlp-subs
 ```
 
-This can significantly speed up processing. If YouTube subtitles are not available, the system automatically falls back to Whisper.
-
-> **Note:** `--use-dlp-subs` only works with YouTube sources. Other platforms always use Whisper.
-
----
-
-## Common Combinations
-
-```bash
-# Clean video without subtitles
-python -m app.cli --url "VIDEO_URL" --no-subs
-
-# Clean text (no karaoke highlight)
-python -m app.cli --url "VIDEO_URL" --no-karaoke
-
-# Maximum subtitle quality
-python -m app.cli --url "VIDEO_URL" --font-style HORMOZI --words-per-sub 4 --advanced-text
-
-# Fast processing (skip Whisper)
-python -m app.cli --url "VIDEO_URL" --use-dlp-subs --no-karaoke
-```
+Uses YouTube's subtitles in the video's own language (uploaded subtitles first, then the original-language
+auto-captions — never a machine-translated track), and falls back to Whisper when none exist. YouTube sources only.
 
 ---
 

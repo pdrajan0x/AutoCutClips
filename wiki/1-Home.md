@@ -2,7 +2,7 @@
 
 Welcome to the **AutoCutClips** wiki! This is the central hub for all documentation related to the project.
 
-**AutoCutClips** is an open-source AI-powered content factory that transforms long-form videos into cinematic short-form highlights with hook teasers, karaoke subtitles, and auto-thumbnails.
+**AutoCutClips** is an open-source AI-powered content factory that turns long-form videos into short-form clips — AI-picked moments, speaker-aware framing, kinetic captions in any language, and scheduled uploads that learn from your channel's results.
 
 ---
 
@@ -15,8 +15,8 @@ Welcome to the **AutoCutClips** wiki! This is the central hub for all documentat
 | 3 | **[CLI Reference](CLI-Reference)** | Full list of all command-line arguments |
 | 4 | **[Face Tracking & Auto-Framing](Face-Tracking-and-Auto-Framing)** | How AI face detection and camera tracking works |
 | 5 | **[Podcast Modes](Podcast-Modes)** | Split-screen & camera-switch for multi-speaker content |
-| 6 | **[Hook V2 & Segment Trimming](Hook-V2-and-Segment-Trimming)** | Multi-hook intros and AI-driven clip trimming |
-| 7 | **[Subtitles & Typography](Subtitles-and-Typography)** | Karaoke subtitles, font styles, kinetic text |
+| 6 | **[Segment Trimming & Hook Teaser](Segment-Trimming-and-Hook-Teaser)** | AI-driven clip trimming and the optional flash-forward teaser |
+| 7 | **[Subtitles & Typography](Subtitles-and-Typography)** | Kinetic captions, headline overlay, fonts, languages |
 | 8 | **[BGM & Audio](BGM-and-Audio)** | Background music, ducking, and audio settings |
 | 9 | **[Video Quality & Rendering](Video-Quality-and-Rendering)** | Resolution, bitrate, sharpening, encoder tuning |
 | 10 | **[Story Clip Mode](Story-Clip-Mode)** | Multi-source narrative assembly for campaigns |
@@ -35,12 +35,13 @@ Welcome to the **AutoCutClips** wiki! This is the central hub for all documentat
 
 - 🤖 **AI Transcriber** — Word-level transcription using Faster-Whisper (large-v3)
 - 🧠 **AI Content Curator** — Google Gemini analyzes context and picks the most viral moments
-- 🎯 **Smart Auto-Framing** — Face-tracking via MediaPipe / YOLOv8 with smooth pan and anti-jitter
-- 🎬 **Cinematic Teaser Hook** — 3-second hook with dark overlay and TV Glitch transition
-- 📝 **Karaoke Subtitles** — Word-by-word highlighted `.ASS` subtitles (Hormozi / Veed style)
+- 🎯 **Smart Auto-Framing** — Face-tracking via MediaPipe / YOLOv8 that follows whoever is talking, with blurred-background fill for faceless footage
+- 📝 **Kinetic Captions** — Spoken word pops in gold, AI keywords larger, plus a headline for sound-off viewers
+- 🌐 **Any Spoken Language** — Captions keep the spoken language; non-Latin scripts are written in English letters
 - 🎥 **B-Roll Integration** — Auto-fetches contextual stock footage from Pexels
 - 🎙️ **Podcast Split-Screen** — Auto speaker diarization with top-bottom split layout
-- 📤 **Auto YouTube Upload** — Upload with scheduling and full metadata support
+- 📋 **Video Queue** — Clip a whole list of links, resumable after a disconnect
+- 📤 **Auto YouTube Upload** — Scheduled uploads with hashtags, spoken-language metadata, and channel learning
 - 📐 **5 Aspect Ratios** — `9:16`, `16:9`, `1:1`, `3:4`, `4:5`
 
 ## 🔄 Pipeline Flow
@@ -48,9 +49,9 @@ Welcome to the **AutoCutClips** wiki! This is the central hub for all documentat
 ```
 Video URL → Download → Whisper Transcription → Gemini AI Analysis → Metadata QA → Render Loop
                                                                                       ↓
-                                                            Face-Track Crop + B-Roll + BGM + Subtitles + Hook
+                                                   Speaker-Aware Crop + B-Roll + BGM + Captions + Headline
                                                                                       ↓
-                                                                              Final MP4 + Thumbnail
+                                                                              Final MP4 → Upload → Learn
 ```
 
 ## 📊 Results

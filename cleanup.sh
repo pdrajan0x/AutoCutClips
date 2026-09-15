@@ -22,13 +22,7 @@ find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null
 find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null
 find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null
 
-# 4. Membersihkan node_modules frontend
-echo "🗑️  Menghapus node_modules frontend..."
-# Docker menggunakan volume tersendiri untuk node_modules di dalam container, jadi menghapusnya di lokal host aman.
-rm -rf web/dashboard/node_modules
-rm -rf web/dashboard/dist
-
-# 5. Membersihkan .cache & .local (WARNING)
+# 4. Membersihkan .cache & .local (WARNING)
 # Hati-hati: Folder .cache menyimpan model AI (HuggingFace/Whisper) berukuran Gigabytes!
 # Jika dihapus, pipeline akan mendownload ulang model AI dari awal. Buka komentar di bawah JIKA Anda benar-benar ingin menghapusnya.
 # echo "🗑️  Menghapus .cache dan .local..."
