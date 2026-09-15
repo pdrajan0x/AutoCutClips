@@ -37,13 +37,16 @@ def _build_ydl_format_selector(download_source_height: str | int) -> str:
     """
     Build a yt-dlp format selector for the requested source quality.
 
-    AV1 is excluded because it lacks hardware acceleration on many platforms
-    (e.g. Colab T4) and makes the OpenCV/FFmpeg software fallbacks fail.
+    AV1 is de-prioritised (not excluded) because it lacks hardware acceleration
+    on many platforms (e.g. Colab T4) and can make software decode fallbacks
+    slow. Every chain ends in an AV1-inclusive catch-all so a video whose only
+    formats *are* AV1 at that height still downloads instead of hard-failing
+    with "Requested format is not available".
     """
     codec_filter = "[vcodec!*=av01]"
 
     if download_source_height == "max":
-        return f"bestvideo{codec_filter}+bestaudio/best{codec_filter}"
+        return f"bestvideo{codec_filter}+bestaudio/best{codec_filter}/bestvideo+bestaudio/best"
 
     try:
         h_val = int(download_source_height)
@@ -51,17 +54,21 @@ def _build_ydl_format_selector(download_source_height: str | int) -> str:
         h_val = 0
 
     if 0 < h_val <= 1080:
-        # At standard resolutions, strictly prefer native MP4 (H.264/AAC).
+        # At standard resolutions, prefer native MP4 (H.264/AAC) first.
         return (
             f"bestvideo[height<=?{h_val}][ext=mp4]{codec_filter}+bestaudio[ext=m4a]/"
             f"bestvideo[height<=?{h_val}]{codec_filter}+bestaudio/"
             f"best[height<=?{h_val}][ext=mp4]{codec_filter}/"
-            f"best[height<=?{h_val}]{codec_filter}"
+            f"best[height<=?{h_val}]{codec_filter}/"
+            f"bestvideo[height<=?{h_val}]+bestaudio/"
+            f"best[height<=?{h_val}]"
         )
 
     return (
         f"bestvideo[height<=?{download_source_height}]{codec_filter}+bestaudio/"
-        f"best[height<=?{download_source_height}]{codec_filter}"
+        f"best[height<=?{download_source_height}]{codec_filter}/"
+        f"bestvideo[height<=?{download_source_height}]+bestaudio/"
+        f"best[height<=?{download_source_height}]"
     )
 
 
