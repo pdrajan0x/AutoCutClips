@@ -25,6 +25,68 @@ _FORBIDDEN_HINT = (
     "      3) Re-run the queue with --retry-failed — this video is skipped, not fatal."
 )
 
+_NO_FORMAT_HINT = (
+    "YouTube offered no downloadable format to any player client. This usually means\n"
+    "      the installed yt-dlp is too old for YouTube's current streaming setup, or\n"
+    "      this IP is being served SABR-only responses. Try:\n"
+    "      1) Update yt-dlp: pip install -U yt-dlp   (fixes this most of the time)\n"
+    "      2) Re-export a fresh cookies.txt from a logged-in browser\n"
+    "      3) Check the format list printed above — if it is empty, the video itself\n"
+    "         may be members-only, age-restricted or region-blocked for this IP."
+)
+
+# YouTube's default `web` client increasingly returns SABR-only responses from
+# datacenter IPs (Colab/Kaggle): extraction succeeds but nothing is downloadable,
+# which yt-dlp reports as "Requested format is not available". These clients still
+# serve normal formats and, unlike `android`, keep working with cookies.
+_YOUTUBE_FALLBACK_CLIENTS = ("tv", "web_safari", "mweb")
+
+
+def _is_no_format_error(msg: str) -> bool:
+    return "Requested format is not available" in msg or "No video formats found" in msg
+
+
+def _youtube_fallback_variants(base_opts: dict):
+    """Client/format combinations to try when the default client yields no format."""
+    for client in _YOUTUBE_FALLBACK_CLIENTS:
+        opts = dict(base_opts)
+        opts["extractor_args"] = {"youtube": {"player_client": [client]}}
+        yield f"the {client} client", opts
+
+    # Last resort: drop the quality/codec filter entirely and take anything playable.
+    for client in (None, *_YOUTUBE_FALLBACK_CLIENTS):
+        opts = dict(base_opts)
+        opts.pop("format", None)
+        label = "the default client"
+        if client:
+            opts["extractor_args"] = {"youtube": {"player_client": [client]}}
+            label = f"the {client} client"
+        yield f"{label} with no quality filter", opts
+
+
+def _log_available_formats(base_opts: dict, url: str) -> None:
+    """Print what YouTube actually offered, so a format failure is diagnosable."""
+    from yt_dlp import YoutubeDL
+
+    probe = dict(base_opts)
+    probe.pop("format", None)
+    try:
+        with YoutubeDL(probe) as ydl:
+            info = ydl.extract_info(url, download=False)
+        formats = info.get("formats") or []
+        if not formats:
+            print("      ℹ️ YouTube offered NO downloadable formats for this video.", flush=True)
+            return
+        print(f"      ℹ️ {len(formats)} format(s) offered, highest last:", flush=True)
+        for f in formats[-8:]:
+            print(
+                f"         {f.get('format_id')}: {f.get('ext')} "
+                f"{f.get('height') or '?'}p vcodec={f.get('vcodec')} acodec={f.get('acodec')}",
+                flush=True,
+            )
+    except Exception as e:
+        print(f"      ⚠️ Could not list the available formats: {e}", flush=True)
+
 PLATFORM_LABELS = {
     "youtube": "YouTube",
     "tiktok": "TikTok",
@@ -305,30 +367,50 @@ def download_video(
 
     import time
 
-    max_attempts = 3
-    for attempt in range(1, max_attempts + 1):
-        with YoutubeDL(ydl_opts) as ydl:
+    def _attempt_download(opts: dict) -> None:
+        """One download, retrying transient 403s with backoff."""
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            with YoutubeDL(opts) as ydl:
+                try:
+                    ydl.download([url])
+                    return
+                except DownloadError as e:
+                    msg = str(e)
+                    if "not a bot" in msg or "Sign in to confirm" in msg:
+                        raise RuntimeError(f"{e}\n      {_BOT_CHECK_HINT}") from e
+                    is_forbidden = "403" in msg or "Forbidden" in msg
+                    if is_forbidden and attempt < max_attempts:
+                        wait_s = 10 * attempt
+                        print(
+                            f"      ⚠️ 403 Forbidden (attempt {attempt}/{max_attempts}) — this is "
+                            f"usually a stale cache/signature URL or brief rate-limiting. "
+                            f"Retrying in {wait_s}s...",
+                            flush=True,
+                        )
+                        time.sleep(wait_s)
+                        continue
+                    if is_forbidden:
+                        raise RuntimeError(f"{e}\n      {_FORBIDDEN_HINT}") from e
+                    raise
+
+    try:
+        _attempt_download(ydl_opts)
+    except DownloadError as e:
+        if not (is_youtube and _is_no_format_error(str(e))):
+            raise
+        # The default client got a SABR-only/empty format list. Work through the
+        # other clients, then drop the quality filter, before giving up.
+        for label, variant_opts in _youtube_fallback_variants(ydl_opts):
+            print(f"      ⚠️ No usable format — retrying with {label}...", flush=True)
             try:
-                ydl.download([url])
+                _attempt_download(variant_opts)
                 break
-            except DownloadError as e:
-                msg = str(e)
-                if "not a bot" in msg or "Sign in to confirm" in msg:
-                    raise RuntimeError(f"{e}\n      {_BOT_CHECK_HINT}") from e
-                is_forbidden = "403" in msg or "Forbidden" in msg
-                if is_forbidden and attempt < max_attempts:
-                    wait_s = 10 * attempt
-                    print(
-                        f"      ⚠️ 403 Forbidden (attempt {attempt}/{max_attempts}) — this is "
-                        f"usually a stale cache/signature URL or brief rate-limiting. "
-                        f"Retrying in {wait_s}s...",
-                        flush=True,
-                    )
-                    time.sleep(wait_s)
-                    continue
-                if is_forbidden:
-                    raise RuntimeError(f"{e}\n      {_FORBIDDEN_HINT}") from e
-                raise
+            except DownloadError:
+                continue
+        else:
+            _log_available_formats(ydl_opts, url)
+            raise RuntimeError(f"{e}\n      {_NO_FORMAT_HINT}") from e
 
     if not os.path.exists(output_path):
         raise RuntimeError(
