@@ -27,6 +27,21 @@ async def lifespan(app: FastAPI):
     print("🚀 AutoCutClips Studio — backend starting...")
     # Printed so a browser blocked by CORS can be diagnosed from the server log.
     print(f"   Allowed origins: {', '.join(ALLOWED_ORIGINS)}")
+
+    # A missing JS runtime makes every YouTube download fail with an error that
+    # never mentions JavaScript, so surface it at boot rather than mid-job.
+    from ...clipping import ytdl
+
+    runtime = ytdl.available_js_runtime()
+    if runtime:
+        print(f"   JS runtime for yt-dlp: {runtime}")
+    else:
+        print(
+            "   ⚠️ No JavaScript runtime — YouTube downloads will fail with\n"
+            "      'Requested format is not available'. Fix it with:\n"
+            "      python -m app.clipping.jsruntime"
+        )
+
     yield
     print("👋 Backend shutting down...")
 

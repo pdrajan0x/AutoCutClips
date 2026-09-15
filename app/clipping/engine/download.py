@@ -349,7 +349,6 @@ def download_video(
             format=_build_ydl_format_selector(download_source_height),
             outtmpl=output_path,
             merge_output_format="mp4",
-            remote_components=["ejs:github"],
             progress_hooks=[_ydl_progress_hook],
         )
     else:

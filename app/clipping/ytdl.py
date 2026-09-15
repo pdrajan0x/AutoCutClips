@@ -41,7 +41,14 @@ def resolve_cookies_file(cfg=None) -> str | None:
 
 def base_opts(cfg=None, **extra) -> dict:
     """yt-dlp options shared by every download, with the cookies file applied."""
-    opts = {"quiet": True, "no_warnings": True, "js_runtimes": dict(JS_RUNTIMES)}
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "js_runtimes": dict(JS_RUNTIMES),
+        # Solving YouTube's challenges needs the EJS solver script as well as a
+        # runtime to execute it; without this yt-dlp refuses to fetch it.
+        "remote_components": ["ejs:github"],
+    }
     cookies = resolve_cookies_file(cfg)
     if cookies:
         opts["cookiefile"] = cookies
@@ -50,6 +57,11 @@ def base_opts(cfg=None, **extra) -> dict:
 
 
 _RUNTIME_CACHE: dict = {}
+
+
+def reset_runtime_cache() -> None:
+    """Forget the probe result, after installing a runtime mid-process."""
+    _RUNTIME_CACHE.clear()
 
 
 def available_js_runtime() -> str | None:
