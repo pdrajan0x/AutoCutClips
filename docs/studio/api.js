@@ -147,6 +147,37 @@ const StudioAPI = (() => {
     return request('/api/youtube/uploadable-jobs');
   }
 
+  async function fetchUploadableClips() {
+    return request('/api/youtube/uploadable-clips');
+  }
+
+  async function fetchChannelStats() {
+    return request('/api/youtube/channel/stats');
+  }
+
+  async function fetchChannelVideos(maxResults = 25) {
+    return request(`/api/youtube/channel/videos?max_results=${maxResults}`);
+  }
+
+  async function fetchYoutubeQueue() {
+    return request('/api/youtube/queue');
+  }
+
+  async function addToYoutubeQueue(payload) {
+    return request('/api/youtube/queue', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async function removeFromYoutubeQueue(itemId) {
+    return request(`/api/youtube/queue/${itemId}`, { method: 'DELETE' });
+  }
+
+  async function uploadQueueItemNow(itemId) {
+    return request(`/api/youtube/queue/${itemId}/upload-now`, { method: 'POST' });
+  }
+
   async function startYoutubeUpload(payload) {
     return request('/api/youtube/upload', {
       method: 'POST',
@@ -179,6 +210,13 @@ const StudioAPI = (() => {
     exchangeYoutubeAuth,
     disconnectYoutube,
     fetchUploadableJobs,
+    fetchUploadableClips,
+    fetchChannelStats,
+    fetchChannelVideos,
+    fetchYoutubeQueue,
+    addToYoutubeQueue,
+    removeFromYoutubeQueue,
+    uploadQueueItemNow,
     startYoutubeUpload,
     fetchYoutubeUploadStatus,
   };

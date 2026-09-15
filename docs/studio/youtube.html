@@ -4,8 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube Upload — OSC Studio</title>
-    <meta name="description" content="Log in with YouTube and publish rendered clips — AutoCutClips Studio">
+    <title>YouTube — OSC Studio</title>
+    <meta name="description" content="Log in with YouTube, browse your channel, and publish rendered clips on a schedule — AutoCutClips Studio">
 
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -27,6 +27,12 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <link rel="stylesheet" href="studio.css">
     <script>if (localStorage.getItem('theme') === 'dark') document.documentElement.classList.add('dark');</script>
+    <style>
+        .yt-tab { padding: 0.5rem 1rem; border-radius: 0.75rem; font-size: 0.75rem; font-weight: 600; transition: all .15s; cursor: pointer; }
+        .yt-tab.active { background: #4f46e5; color: white; }
+        .yt-tab:not(.active) { color: #64748b; }
+        .yt-tab:not(.active):hover { background: rgba(148,163,184,.1); }
+    </style>
 </head>
 
 <body class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 font-sans transition-colors duration-300">
@@ -51,7 +57,7 @@
             <nav class="sidebar-nav">
                 <a href="index.html" class="sidebar-link"><i data-lucide="layout-dashboard" class="nav-icon"></i> Dashboard</a>
                 <a href="new-job.html" class="sidebar-link"><i data-lucide="plus-circle" class="nav-icon"></i> New Job</a>
-                <a href="youtube.html" class="sidebar-link active"><i data-lucide="youtube" class="nav-icon"></i> YouTube Upload</a>
+                <a href="youtube.html" class="sidebar-link active"><i data-lucide="youtube" class="nav-icon"></i> YouTube</a>
                 <a href="settings.html" class="sidebar-link"><i data-lucide="settings" class="nav-icon"></i> Settings</a>
             </nav>
             <div class="connect-panel">
@@ -79,14 +85,20 @@
         <main class="studio-main">
             <div class="md:hidden sticky top-0 z-30 flex items-center gap-3 px-4 h-14 bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80">
                 <button onclick="toggleSidebar()" class="mobile-toggle p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"><i data-lucide="menu" class="w-5 h-5"></i></button>
-                <span class="font-display font-bold text-sm">📺 YouTube Upload</span>
+                <span class="font-display font-bold text-sm">📺 YouTube</span>
             </div>
 
-            <div class="max-w-3xl mx-auto px-4 sm:px-6 py-8 fade-in">
+            <div class="max-w-5xl mx-auto px-4 sm:px-6 py-8 fade-in">
                 <!-- Page Header -->
-                <div class="mb-8">
-                    <h1 class="font-display font-bold text-2xl sm:text-3xl text-slate-900 dark:text-white">YouTube Upload</h1>
-                    <p class="text-slate-500 dark:text-slate-400 text-sm mt-1">Log in once, then publish rendered clips straight from the Studio</p>
+                <div class="mb-6 flex items-center justify-between flex-wrap gap-3">
+                    <div>
+                        <h1 class="font-display font-bold text-2xl sm:text-3xl text-slate-900 dark:text-white">YouTube</h1>
+                        <p class="text-slate-500 dark:text-slate-400 text-sm mt-1">Your channel, ready-to-upload clips, and the publish queue</p>
+                    </div>
+                    <div id="header-channel-badge" class="hidden items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 text-sm">
+                        <img id="header-channel-thumb" class="w-6 h-6 rounded-full" src="" alt="">
+                        <span id="header-channel-title" class="font-medium"></span>
+                    </div>
                 </div>
 
                 <!-- Not Connected to backend -->
@@ -101,46 +113,31 @@
 
                 <div id="page-content" class="hidden">
 
-                    <!-- Step 1: Client Secret -->
-                    <div id="card-client-secret" class="glass-card p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm mb-6">
-                        <h3 class="font-display font-semibold text-base text-slate-900 dark:text-white mb-2 flex items-center gap-2">
-                            <i data-lucide="file-key" class="w-5 h-5 text-brand-500"></i> 1. Google OAuth Client
-                        </h3>
-                        <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
-                            One-time setup. In Google Cloud Console: <b>APIs & Services → Credentials → Create OAuth client ID → Desktop app</b>,
-                            download the JSON, and paste its full contents below. This only needs to be done once per account —
-                            it is stored on the backend, not in your browser.
-                        </p>
-                        <textarea id="input-client-secret" rows="4" placeholder='{"installed":{"client_id":"...","client_secret":"...","...":"..."}}'
-                            class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-500/50 placeholder-slate-400 text-slate-900 dark:text-white"></textarea>
-                        <div class="flex items-center gap-3 mt-3">
-                            <button onclick="saveClientSecret()" id="save-secret-btn" class="px-4 py-2 rounded-lg bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 transition-colors">
-                                Save Client
-                            </button>
-                            <span id="client-secret-status" class="text-xs text-slate-400"></span>
-                        </div>
-                    </div>
-
-                    <!-- Step 2: Login -->
-                    <div id="card-login" class="glass-card p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm mb-6">
-                        <h3 class="font-display font-semibold text-base text-slate-900 dark:text-white mb-2 flex items-center gap-2">
-                            <i data-lucide="log-in" class="w-5 h-5 text-brand-500"></i> 2. Log In With YouTube
-                        </h3>
-
-                        <div id="connected-panel" class="hidden">
-                            <div class="flex items-center gap-3 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/40 mb-3">
-                                <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-500 flex-shrink-0"></i>
-                                <div class="text-sm">
-                                    <span class="font-semibold text-emerald-700 dark:text-emerald-400" id="connected-channel-name">Connected</span>
-                                    <p class="text-xs text-emerald-600/80 dark:text-emerald-400/70">Login is saved — you won't need to repeat this unless you disconnect.</p>
-                                </div>
+                    <!-- Not logged in to YouTube: show setup -->
+                    <div id="setup-section">
+                        <div class="glass-card p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm mb-6">
+                            <h3 class="font-display font-semibold text-base text-slate-900 dark:text-white mb-2 flex items-center gap-2">
+                                <i data-lucide="file-key" class="w-5 h-5 text-brand-500"></i> 1. Google OAuth Client
+                            </h3>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                                One-time setup. In Google Cloud Console: <b>APIs & Services → Credentials → Create OAuth client ID → Desktop app</b>,
+                                click <b>Download JSON</b>, and paste its full contents below (don't retype it). Also add your account under
+                                <b>Google Auth Platform → Audience → Test users</b>.
+                            </p>
+                            <textarea id="input-client-secret" rows="4" placeholder='{"installed":{"client_id":"...","client_secret":"...","auth_uri":"...","token_uri":"...","...":"..."}}'
+                                class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-500/50 placeholder-slate-400 text-slate-900 dark:text-white"></textarea>
+                            <div class="flex items-center gap-3 mt-3">
+                                <button onclick="saveClientSecret()" id="save-secret-btn" class="px-4 py-2 rounded-lg bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 transition-colors">
+                                    Save Client
+                                </button>
+                                <span id="client-secret-status" class="text-xs text-slate-400"></span>
                             </div>
-                            <button onclick="disconnectYoutube()" class="px-3 py-2 rounded-lg border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 text-xs font-medium hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors">
-                                Disconnect Account
-                            </button>
                         </div>
 
-                        <div id="login-panel">
+                        <div class="glass-card p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm mb-6">
+                            <h3 class="font-display font-semibold text-base text-slate-900 dark:text-white mb-2 flex items-center gap-2">
+                                <i data-lucide="log-in" class="w-5 h-5 text-brand-500"></i> 2. Log In With YouTube
+                            </h3>
                             <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
                                 Since the backend runs headless (Kaggle/Colab), login works via a link: open it, approve access,
                                 then paste back the address the browser lands on (it will show "can't be reached" — that's expected).
@@ -163,50 +160,76 @@
                                     </button>
                                 </div>
                             </div>
+                            <div id="login-status-msg" class="text-xs mt-3 hidden"></div>
                         </div>
-                        <div id="login-status-msg" class="text-xs mt-3 hidden"></div>
                     </div>
 
-                    <!-- Step 3: Upload -->
-                    <div id="card-upload" class="glass-card p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm mb-6">
-                        <h3 class="font-display font-semibold text-base text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-                            <i data-lucide="upload-cloud" class="w-5 h-5 text-brand-500"></i> 3. Publish Clips
-                        </h3>
-
-                        <div id="jobs-empty" class="hidden text-sm text-slate-400 text-center py-6">
-                            No completed jobs with rendered clips yet. Finish a clipping job first.
+                    <!-- Connected: tabbed dashboard -->
+                    <div id="dashboard-section" class="hidden">
+                        <div class="flex items-center gap-2 mb-5 flex-wrap">
+                            <div class="yt-tab active" onclick="switchTab('channel')" data-tab="channel">📺 Channel</div>
+                            <div class="yt-tab" onclick="switchTab('ready')" data-tab="ready">🎬 Ready to Upload</div>
+                            <div class="yt-tab" onclick="switchTab('queue')" data-tab="queue">⏱️ Queue</div>
+                            <div class="yt-tab" onclick="switchTab('account')" data-tab="account">⚙️ Account</div>
                         </div>
 
-                        <div id="jobs-list" class="space-y-3 mb-5"></div>
+                        <!-- TAB: Channel -->
+                        <div id="tab-channel" class="tab-panel">
+                            <div id="channel-stats" class="grid grid-cols-3 gap-3 mb-5"></div>
+                            <div id="channel-videos-loading" class="text-center py-10 text-sm text-slate-400">Loading your videos...</div>
+                            <div id="channel-videos-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+                            <div id="channel-videos-empty" class="hidden text-center py-10 text-sm text-slate-400">No videos uploaded yet.</div>
+                        </div>
 
-                        <div id="upload-config" class="hidden">
-                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-                                <div>
-                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Interval (hours)</label>
-                                    <input id="input-interval-hours" type="number" min="0" step="0.5" value="2"
-                                        class="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-900 dark:text-white">
+                        <!-- TAB: Ready to Upload -->
+                        <div id="tab-ready" class="tab-panel hidden">
+                            <div class="glass-card p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm mb-5">
+                                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                                    <div>
+                                        <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Interval Between Uploads (hours)</label>
+                                        <input id="input-interval-hours" type="number" min="0" step="0.5" value="2"
+                                            class="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-900 dark:text-white">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Privacy</label>
+                                        <select id="input-privacy" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-900 dark:text-white">
+                                            <option value="public">Public</option>
+                                            <option value="unlisted">Unlisted</option>
+                                            <option value="private">Private</option>
+                                        </select>
+                                    </div>
+                                    <div class="flex items-end">
+                                        <button onclick="addSelectedToQueue()" id="add-queue-btn" class="w-full px-4 py-2.5 rounded-xl bg-brand-600 text-white font-semibold text-sm hover:bg-brand-700 transition-colors shadow-lg shadow-brand-500/20 flex items-center justify-center gap-2">
+                                            <i data-lucide="clock" class="w-4 h-4"></i> Queue Selected
+                                        </button>
+                                    </div>
                                 </div>
-                                <div>
-                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Timezone</label>
-                                    <input id="input-tz-name" type="text" value="Asia/Kolkata"
-                                        class="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-900 dark:text-white">
-                                </div>
-                                <div class="flex items-end pb-1">
-                                    <label class="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                                        <input id="input-test-mode" type="checkbox" class="w-4 h-4 rounded border-slate-300">
-                                        Test mode (1 clip only)
-                                    </label>
-                                </div>
+                                <p class="text-xs text-slate-400">Pick clips below, set the gap between publishes, and they'll upload automatically — spaced out one after another.</p>
                             </div>
-                            <button onclick="startUpload()" id="start-upload-btn" class="px-5 py-2.5 rounded-xl bg-brand-600 text-white font-semibold text-sm hover:bg-brand-700 transition-colors shadow-lg shadow-brand-500/20 flex items-center gap-2">
-                                <i data-lucide="rocket" class="w-4 h-4"></i> Start Upload
-                            </button>
+
+                            <div id="ready-empty" class="hidden text-center py-10 text-sm text-slate-400">No rendered clips waiting to be uploaded.</div>
+                            <div id="ready-list" class="space-y-2"></div>
                         </div>
 
-                        <div id="upload-progress" class="hidden mt-5 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40">
-                            <div class="flex items-center gap-2 text-sm">
-                                <span class="spinner spinner-dark" id="upload-spinner"></span>
-                                <span id="upload-status-text">Uploading...</span>
+                        <!-- TAB: Queue -->
+                        <div id="tab-queue" class="tab-panel hidden">
+                            <div id="queue-empty" class="hidden text-center py-10 text-sm text-slate-400">Nothing in the upload queue.</div>
+                            <div id="queue-list" class="space-y-2"></div>
+                        </div>
+
+                        <!-- TAB: Account -->
+                        <div id="tab-account" class="tab-panel hidden">
+                            <div class="glass-card p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm">
+                                <div class="flex items-center gap-3 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/40 mb-4">
+                                    <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-500 flex-shrink-0"></i>
+                                    <div class="text-sm">
+                                        <span class="font-semibold text-emerald-700 dark:text-emerald-400" id="account-channel-name">Connected</span>
+                                        <p class="text-xs text-emerald-600/80 dark:text-emerald-400/70">Login is saved on the backend — you won't need to repeat this unless you disconnect.</p>
+                                    </div>
+                                </div>
+                                <button onclick="disconnectYoutube()" class="px-3 py-2 rounded-lg border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 text-xs font-medium hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors">
+                                    Disconnect Account
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -219,7 +242,8 @@
     <script>
         lucide.createIcons();
 
-        let selectedJobId = null;
+        let selectedClips = new Set();
+        let queuePollTimer = null;
 
         async function init() {
             if (!StudioAPI.isConfigured()) {
@@ -228,7 +252,6 @@
             }
             document.getElementById('page-content').classList.remove('hidden');
             await refreshStatus();
-            await loadUploadableJobs();
         }
 
         async function refreshStatus() {
@@ -238,24 +261,37 @@
                 if (status.has_client_secret) {
                     document.getElementById('client-secret-status').textContent = '✅ Client saved';
                     document.getElementById('client-secret-status').className = 'text-xs text-emerald-500';
-                } else {
-                    document.getElementById('client-secret-status').textContent = 'Not set';
-                    document.getElementById('client-secret-status').className = 'text-xs text-slate-400';
                 }
 
                 if (status.connected) {
-                    document.getElementById('connected-panel').classList.remove('hidden');
-                    document.getElementById('login-panel').classList.add('hidden');
-                    document.getElementById('connected-channel-name').textContent =
+                    document.getElementById('setup-section').classList.add('hidden');
+                    document.getElementById('dashboard-section').classList.remove('hidden');
+                    document.getElementById('account-channel-name').textContent =
                         `Connected as ${status.channel?.title || 'YouTube channel'}`;
+
+                    document.getElementById('header-channel-badge').classList.remove('hidden');
+                    document.getElementById('header-channel-badge').classList.add('flex');
+                    document.getElementById('header-channel-title').textContent = status.channel?.title || '';
+
+                    loadChannelTab();
+                    loadReadyTab();
+                    loadQueueTab();
+                    if (!queuePollTimer) queuePollTimer = setInterval(loadQueueTab, 15000);
                 } else {
-                    document.getElementById('connected-panel').classList.add('hidden');
-                    document.getElementById('login-panel').classList.remove('hidden');
+                    document.getElementById('setup-section').classList.remove('hidden');
+                    document.getElementById('dashboard-section').classList.add('hidden');
                 }
             } catch (err) {
                 console.error('youtube status error', err);
             }
         }
+
+        function switchTab(name) {
+            document.querySelectorAll('.yt-tab').forEach(el => el.classList.toggle('active', el.dataset.tab === name));
+            document.querySelectorAll('.tab-panel').forEach(el => el.classList.toggle('hidden', el.id !== `tab-${name}`));
+        }
+
+        // ---- Setup flow ----
 
         async function saveClientSecret() {
             const btn = document.getElementById('save-secret-btn');
@@ -330,95 +366,198 @@
             if (!confirm('Disconnect the YouTube account from this Studio?')) return;
             try {
                 await StudioAPI.disconnectYoutube();
+                if (queuePollTimer) { clearInterval(queuePollTimer); queuePollTimer = null; }
                 await refreshStatus();
             } catch (err) {
                 alert('Failed: ' + err.message);
             }
         }
 
-        async function loadUploadableJobs() {
-            try {
-                const { jobs } = await StudioAPI.fetchUploadableJobs();
-                const list = document.getElementById('jobs-list');
+        // ---- Channel tab ----
 
-                if (!jobs.length) {
-                    document.getElementById('jobs-empty').classList.remove('hidden');
+        async function loadChannelTab() {
+            try {
+                const stats = await StudioAPI.fetchChannelStats();
+                document.getElementById('header-channel-thumb').src = stats.thumbnail || '';
+                document.getElementById('channel-stats').innerHTML = `
+                    <div class="glass-card p-4 rounded-xl border border-slate-200/80 dark:border-slate-800/80 text-center">
+                        <div class="text-xs text-slate-400 mb-1">Subscribers</div>
+                        <div class="text-xl font-bold text-slate-900 dark:text-white">${stats.subscriber_count.toLocaleString()}</div>
+                    </div>
+                    <div class="glass-card p-4 rounded-xl border border-slate-200/80 dark:border-slate-800/80 text-center">
+                        <div class="text-xs text-slate-400 mb-1">Total Views</div>
+                        <div class="text-xl font-bold text-slate-900 dark:text-white">${stats.view_count.toLocaleString()}</div>
+                    </div>
+                    <div class="glass-card p-4 rounded-xl border border-slate-200/80 dark:border-slate-800/80 text-center">
+                        <div class="text-xs text-slate-400 mb-1">Videos</div>
+                        <div class="text-xl font-bold text-slate-900 dark:text-white">${stats.video_count.toLocaleString()}</div>
+                    </div>
+                `;
+            } catch (err) {
+                console.error('channel stats error', err);
+            }
+
+            try {
+                const { videos } = await StudioAPI.fetchChannelVideos(25);
+                document.getElementById('channel-videos-loading').classList.add('hidden');
+
+                if (!videos.length) {
+                    document.getElementById('channel-videos-empty').classList.remove('hidden');
                     return;
                 }
 
-                list.innerHTML = jobs.map(j => `
-                    <label class="flex items-center gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-900/40 cursor-pointer transition-colors">
-                        <input type="radio" name="job-select" value="${j.job_id}" onchange="selectJob('${j.job_id}')" class="w-4 h-4">
-                        <div class="flex-1 min-w-0">
-                            <div class="text-sm font-medium text-slate-900 dark:text-white truncate">${j.url || j.job_id}</div>
-                            <div class="text-xs text-slate-400">${j.clip_count} clip(s) · ${j.uploaded_count} already uploaded</div>
+                const privacyBadge = { public: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400', unlisted: 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400', private: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' };
+
+                document.getElementById('channel-videos-grid').innerHTML = videos.map(v => `
+                    <a href="${v.url}" target="_blank" rel="noopener" class="glass-card rounded-xl border border-slate-200/80 dark:border-slate-800/80 overflow-hidden hover:shadow-md transition-shadow flex gap-3 p-3">
+                        <img src="${v.thumbnail || ''}" class="w-28 h-16 object-cover rounded-lg flex-shrink-0 bg-slate-200 dark:bg-slate-800" alt="">
+                        <div class="min-w-0 flex-1">
+                            <div class="text-sm font-medium text-slate-900 dark:text-white truncate">${v.title}</div>
+                            <div class="text-xs text-slate-400 mt-1">${formatDate(v.published_at)}</div>
+                            <div class="flex items-center gap-3 mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+                                <span>👁️ ${v.view_count.toLocaleString()}</span>
+                                ${v.like_count !== null ? `<span>👍 ${v.like_count.toLocaleString()}</span>` : ''}
+                                <span class="px-1.5 py-0.5 rounded ${privacyBadge[v.privacy_status] || ''}">${v.privacy_status}</span>
+                            </div>
                         </div>
-                    </label>
+                    </a>
                 `).join('');
             } catch (err) {
-                console.error('load jobs error', err);
+                document.getElementById('channel-videos-loading').classList.add('hidden');
+                console.error('channel videos error', err);
             }
         }
 
-        function selectJob(jobId) {
-            selectedJobId = jobId;
-            document.getElementById('upload-config').classList.remove('hidden');
+        // ---- Ready to Upload tab ----
+
+        async function loadReadyTab() {
+            try {
+                const { clips } = await StudioAPI.fetchUploadableClips();
+                const list = document.getElementById('ready-list');
+
+                if (!clips.length) {
+                    document.getElementById('ready-empty').classList.remove('hidden');
+                    list.innerHTML = '';
+                    return;
+                }
+                document.getElementById('ready-empty').classList.add('hidden');
+
+                const baseUrl = StudioAPI.getBackendUrl();
+                list.innerHTML = clips.map(c => {
+                    const key = `${c.job_id}:${c.rank}`;
+                    const checked = selectedClips.has(key) ? 'checked' : '';
+                    return `
+                    <label class="flex items-center gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-900/40 cursor-pointer transition-colors">
+                        <input type="checkbox" ${checked} onchange="toggleClipSelect('${key}')" class="w-4 h-4 flex-shrink-0">
+                        ${c.thumbnail_url ? `<img src="${baseUrl}${c.thumbnail_url}" class="w-20 h-12 object-cover rounded-lg flex-shrink-0 bg-slate-200 dark:bg-slate-800">` : '<div class="w-20 h-12 rounded-lg bg-slate-200 dark:bg-slate-800 flex-shrink-0"></div>'}
+                        <div class="min-w-0 flex-1">
+                            <div class="text-sm font-medium text-slate-900 dark:text-white truncate">${c.title}</div>
+                            <div class="text-xs text-slate-400">${c.viral_score ? `🔥 ${c.viral_score}` : ''} ${c.duration ? `· ${Math.round(c.duration)}s` : ''}</div>
+                        </div>
+                    </label>`;
+                }).join('');
+            } catch (err) {
+                console.error('ready clips error', err);
+            }
         }
 
-        async function startUpload() {
-            if (!selectedJobId) return;
-            const btn = document.getElementById('start-upload-btn');
-            const progress = document.getElementById('upload-progress');
-            const statusText = document.getElementById('upload-status-text');
+        function toggleClipSelect(key) {
+            if (selectedClips.has(key)) selectedClips.delete(key);
+            else selectedClips.add(key);
+        }
 
-            const payload = {
-                job_id: selectedJobId,
-                interval_hours: parseFloat(document.getElementById('input-interval-hours').value) || 0,
-                tz_name: document.getElementById('input-tz-name').value.trim() || 'Asia/Kolkata',
-                test_mode: document.getElementById('input-test-mode').checked,
-            };
+        async function addSelectedToQueue() {
+            if (!selectedClips.size) { alert('Select at least one clip first.'); return; }
+
+            const btn = document.getElementById('add-queue-btn');
+            const items = Array.from(selectedClips).map(key => {
+                const [job_id, rank] = key.split(':');
+                return { job_id, rank: parseInt(rank) };
+            });
 
             btn.disabled = true;
-            progress.classList.remove('hidden');
-            statusText.textContent = 'Starting upload...';
-
+            btn.innerHTML = '<span class="spinner"></span> Queuing...';
             try {
-                await StudioAPI.startYoutubeUpload(payload);
-                pollUploadStatus(selectedJobId);
+                await StudioAPI.addToYoutubeQueue({
+                    items,
+                    interval_hours: parseFloat(document.getElementById('input-interval-hours').value) || 0,
+                    privacy_status: document.getElementById('input-privacy').value,
+                });
+                selectedClips.clear();
+                await loadReadyTab();
+                await loadQueueTab();
+                switchTab('queue');
             } catch (err) {
-                statusText.textContent = '❌ ' + err.message;
+                alert('Failed to queue: ' + err.message);
+            } finally {
                 btn.disabled = false;
+                btn.innerHTML = '<i data-lucide="clock" class="w-4 h-4"></i> Queue Selected';
+                lucide.createIcons();
             }
         }
 
-        async function pollUploadStatus(jobId) {
-            const statusText = document.getElementById('upload-status-text');
-            const spinner = document.getElementById('upload-spinner');
-            const btn = document.getElementById('start-upload-btn');
+        // ---- Queue tab ----
 
-            const tick = async () => {
-                try {
-                    const res = await StudioAPI.fetchYoutubeUploadStatus(jobId);
-                    if (res.state === 'running') {
-                        statusText.textContent = 'Uploading clips...';
-                        setTimeout(tick, 3000);
-                    } else if (res.state === 'done') {
-                        spinner.style.display = 'none';
-                        const count = (res.results || []).filter(r => r.status === 'uploaded').length;
-                        statusText.textContent = `✅ Done — ${count} clip(s) uploaded.`;
-                        btn.disabled = false;
-                        loadUploadableJobs();
-                    } else if (res.state === 'failed') {
-                        spinner.style.display = 'none';
-                        statusText.textContent = '❌ ' + (res.error || 'Upload failed.');
-                        btn.disabled = false;
-                    }
-                } catch (err) {
-                    statusText.textContent = '❌ ' + err.message;
-                    btn.disabled = false;
+        const QUEUE_STATUS_STYLE = {
+            queued: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
+            uploading: 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400',
+            uploaded: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400',
+            failed: 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400',
+        };
+
+        async function loadQueueTab() {
+            try {
+                const { items } = await StudioAPI.fetchYoutubeQueue();
+                const list = document.getElementById('queue-list');
+
+                if (!items.length) {
+                    document.getElementById('queue-empty').classList.remove('hidden');
+                    list.innerHTML = '';
+                    return;
                 }
-            };
-            tick();
+                document.getElementById('queue-empty').classList.add('hidden');
+
+                const baseUrl = StudioAPI.getBackendUrl();
+                list.innerHTML = items.map(i => `
+                    <div class="flex items-center gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+                        ${i.thumbnail_url ? `<img src="${baseUrl}${i.thumbnail_url}" class="w-20 h-12 object-cover rounded-lg flex-shrink-0 bg-slate-200 dark:bg-slate-800">` : '<div class="w-20 h-12 rounded-lg bg-slate-200 dark:bg-slate-800 flex-shrink-0"></div>'}
+                        <div class="min-w-0 flex-1">
+                            <div class="text-sm font-medium text-slate-900 dark:text-white truncate">${i.title}</div>
+                            <div class="text-xs text-slate-400">
+                                ${i.status === 'uploaded' ? `<a href="${i.youtube_url}" target="_blank" class="text-brand-500 hover:underline">View on YouTube →</a>` : `Scheduled ${formatDate(i.scheduled_at)}`}
+                                ${i.status === 'failed' && i.error ? `<span class="text-red-500"> — ${i.error}</span>` : ''}
+                            </div>
+                        </div>
+                        <span class="px-2 py-1 rounded-lg text-xs font-semibold flex-shrink-0 ${QUEUE_STATUS_STYLE[i.status] || ''}">${i.status}</span>
+                        ${i.status === 'queued' || i.status === 'failed' ? `
+                            <button onclick="uploadNow('${i.id}')" title="Upload now" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 flex-shrink-0"><i data-lucide="zap" class="w-4 h-4"></i></button>
+                            <button onclick="removeQueueItem('${i.id}')" title="Remove" class="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 text-red-500 flex-shrink-0"><i data-lucide="x" class="w-4 h-4"></i></button>
+                        ` : ''}
+                    </div>
+                `).join('');
+                lucide.createIcons();
+            } catch (err) {
+                console.error('queue load error', err);
+            }
+        }
+
+        async function removeQueueItem(id) {
+            try {
+                await StudioAPI.removeFromYoutubeQueue(id);
+                await loadQueueTab();
+                await loadReadyTab();
+            } catch (err) {
+                alert('Failed: ' + err.message);
+            }
+        }
+
+        async function uploadNow(id) {
+            try {
+                await StudioAPI.uploadQueueItemNow(id);
+                await loadQueueTab();
+            } catch (err) {
+                alert('Failed: ' + err.message);
+            }
         }
 
         init();

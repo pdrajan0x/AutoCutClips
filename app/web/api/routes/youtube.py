@@ -16,13 +16,17 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ....uploaders import youtube_token
-from ....uploaders.youtube import upload_manifest_to_youtube
+from ....uploaders.youtube import get_youtube_service, upload_manifest_to_youtube, upload_video_to_youtube
 from .. import store
 
 router = APIRouter(prefix="/api/youtube", tags=["youtube"])
@@ -31,10 +35,12 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 CREDENTIALS_DIR = os.path.join(PROJECT_ROOT, ".credentials")
 CLIENT_SECRET_FILE = os.path.join(CREDENTIALS_DIR, "client_secret.json")
 TOKEN_FILE = os.path.join(CREDENTIALS_DIR, "youtube_token.json")
+QUEUE_FILE = os.path.join(PROJECT_ROOT, "outputs", "youtube_queue.json")
 
 # Single-user local backend: one OAuth flow and one upload run in flight at a time.
 _pending_flow: dict = {"flow": None}
 _upload_status: dict[str, dict] = {}
+_queue_lock = threading.Lock()
 
 
 class ClientSecretRequest(BaseModel):
@@ -92,6 +98,9 @@ async def youtube_status():
     }
 
 
+_REQUIRED_CLIENT_FIELDS = ("client_id", "client_secret", "auth_uri", "token_uri")
+
+
 @router.post("/client-secret")
 async def save_client_secret(req: ClientSecretRequest):
     """Store the OAuth client JSON downloaded from Google Cloud Console."""
@@ -99,6 +108,17 @@ async def save_client_secret(req: ClientSecretRequest):
         parsed = json.loads(req.content)
     except json.JSONDecodeError:
         raise HTTPException(400, "Not valid JSON — paste the full client_secret.json content.")
+
+    block = parsed.get("installed") or parsed.get("web") if isinstance(parsed, dict) else None
+    missing = [f for f in _REQUIRED_CLIENT_FIELDS if not (block or {}).get(f)]
+    if not block or missing:
+        raise HTTPException(
+            400,
+            "This doesn't look like the full client_secret.json Google Cloud Console gives you "
+            f"(missing: {', '.join(missing) or 'installed/web block'}). Download the file fresh "
+            "from Credentials → your OAuth client → Download JSON, and paste it unmodified — "
+            "don't retype or shorten it.",
+        )
 
     os.makedirs(CREDENTIALS_DIR, exist_ok=True)
     with open(CLIENT_SECRET_FILE, "w", encoding="utf-8") as f:
@@ -117,9 +137,17 @@ async def start_auth():
 
     from google_auth_oauthlib.flow import InstalledAppFlow
 
-    flow = InstalledAppFlow.from_client_secrets_file(
-        CLIENT_SECRET_FILE, scopes=youtube_token.YOUTUBE_SCOPES
-    )
+    try:
+        flow = InstalledAppFlow.from_client_secrets_file(
+            CLIENT_SECRET_FILE, scopes=youtube_token.YOUTUBE_SCOPES
+        )
+    except ValueError as e:
+        raise HTTPException(
+            400,
+            f"The saved client_secret.json is invalid ({e}). Re-download it from Google Cloud "
+            "Console (Credentials → your OAuth client → Download JSON) and save it again — "
+            "don't retype or shorten it.",
+        )
     flow.redirect_uri = "http://localhost:1"
     auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent")
     _pending_flow["flow"] = flow
@@ -231,3 +259,294 @@ async def upload_to_youtube(req: UploadRequest):
 @router.get("/upload/{job_id}/status")
 async def upload_status(job_id: str):
     return _upload_status.get(job_id, {"state": "idle", "results": None, "error": None})
+
+
+# ---------------------------------------------------------------------------
+# Channel dashboard (uploaded videos + stats)
+# ---------------------------------------------------------------------------
+
+def _youtube_client():
+    if not os.path.exists(TOKEN_FILE):
+        raise HTTPException(400, "Not connected — complete YouTube login first.")
+    try:
+        return get_youtube_service(TOKEN_FILE)
+    except Exception as e:
+        raise HTTPException(400, f"Could not use the stored YouTube login: {e}")
+
+
+@router.get("/channel/stats")
+async def channel_stats():
+    yt = _youtube_client()
+    items = yt.channels().list(part="snippet,statistics", mine=True).execute().get("items", [])
+    if not items:
+        raise HTTPException(404, "No YouTube channel found for this account.")
+    ch = items[0]
+    stats = ch.get("statistics", {})
+    return {
+        "title": ch["snippet"]["title"],
+        "thumbnail": ch["snippet"].get("thumbnails", {}).get("default", {}).get("url"),
+        "subscriber_count": int(stats.get("subscriberCount", 0)),
+        "view_count": int(stats.get("viewCount", 0)),
+        "video_count": int(stats.get("videoCount", 0)),
+    }
+
+
+@router.get("/channel/videos")
+async def channel_videos(max_results: int = 25):
+    yt = _youtube_client()
+
+    channels = yt.channels().list(part="contentDetails", mine=True).execute().get("items", [])
+    if not channels:
+        raise HTTPException(404, "No YouTube channel found for this account.")
+    uploads_playlist = channels[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+
+    playlist_items = yt.playlistItems().list(
+        part="contentDetails", playlistId=uploads_playlist, maxResults=min(max_results, 50)
+    ).execute().get("items", [])
+    video_ids = [pi["contentDetails"]["videoId"] for pi in playlist_items]
+    if not video_ids:
+        return {"videos": []}
+
+    videos = yt.videos().list(
+        part="snippet,statistics,status", id=",".join(video_ids)
+    ).execute().get("items", [])
+
+    results = []
+    for v in videos:
+        snippet, stats, status = v["snippet"], v.get("statistics", {}), v.get("status", {})
+        results.append({
+            "video_id": v["id"],
+            "title": snippet.get("title"),
+            "thumbnail": snippet.get("thumbnails", {}).get("medium", {}).get("url"),
+            "published_at": snippet.get("publishedAt"),
+            "privacy_status": status.get("privacyStatus"),
+            "view_count": int(stats.get("viewCount", 0)),
+            "like_count": int(stats.get("likeCount", 0)) if "likeCount" in stats else None,
+            "comment_count": int(stats.get("commentCount", 0)) if "commentCount" in stats else None,
+            "url": f"https://www.youtube.com/watch?v={v['id']}",
+        })
+    return {"videos": results}
+
+
+# ---------------------------------------------------------------------------
+# Ready-to-upload clips (across all completed jobs, clip-level)
+# ---------------------------------------------------------------------------
+
+def _manifest_rows(job_id: str) -> list[dict]:
+    manifest_path = os.path.join(PROJECT_ROOT, "outputs", job_id, "render_manifest.json")
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def _manifest_row(job_id: str, rank: int) -> Optional[dict]:
+    for row in _manifest_rows(job_id):
+        if row.get("rank") == rank:
+            return row
+    return None
+
+
+@router.get("/uploadable-clips")
+async def uploadable_clips():
+    """Individual rendered clips (across all completed jobs) not yet uploaded or queued."""
+    queued_keys = {(i["job_id"], i["rank"]) for i in _load_queue() if i["status"] in ("queued", "uploading")}
+
+    results = []
+    for job in store.list_jobs():
+        if job.get("status") != "completed":
+            continue
+        for row in _manifest_rows(job["id"]):
+            if row.get("status") != "success":
+                continue
+            if row.get("youtube_upload_status") == "uploaded":
+                continue
+            if (job["id"], row.get("rank")) in queued_keys:
+                continue
+            filename = os.path.basename(row.get("video_path", ""))
+            results.append({
+                "job_id": job["id"],
+                "rank": row.get("rank"),
+                "title": row.get("youtube_title_final") or row.get("title") or f"Clip {row.get('rank')}",
+                "viral_score": row.get("viral_score"),
+                "duration": row.get("duration"),
+                "thumbnail_url": f"/api/outputs/{job['id']}/{os.path.basename(row.get('thumbnail_path') or '')}"
+                if row.get("thumbnail_path") else None,
+                "download_url": f"/api/outputs/{job['id']}/{filename}",
+            })
+    return {"clips": results}
+
+
+# ---------------------------------------------------------------------------
+# Upload queue — pick clips, space them by an interval, upload automatically
+# ---------------------------------------------------------------------------
+
+class QueueAddRequest(BaseModel):
+    items: list[dict]  # [{"job_id": "...", "rank": 1}, ...]
+    interval_hours: float = 2.0
+    privacy_status: str = "public"  # "public" | "unlisted" | "private"
+    start_at: Optional[str] = None  # ISO datetime; defaults to now
+
+
+def _load_queue() -> list[dict]:
+    if not os.path.exists(QUEUE_FILE):
+        return []
+    try:
+        with open(QUEUE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def _save_queue(items: list[dict]) -> None:
+    os.makedirs(os.path.dirname(QUEUE_FILE), exist_ok=True)
+    tmp = QUEUE_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, QUEUE_FILE)
+
+
+@router.get("/queue")
+async def get_queue():
+    with _queue_lock:
+        items = _load_queue()
+    return {"items": sorted(items, key=lambda i: i["scheduled_at"])}
+
+
+@router.post("/queue")
+async def add_to_queue(req: QueueAddRequest):
+    if not req.items:
+        raise HTTPException(400, "No clips selected.")
+    if req.privacy_status not in ("public", "unlisted", "private"):
+        raise HTTPException(400, "privacy_status must be public, unlisted or private.")
+
+    with _queue_lock:
+        existing = _load_queue()
+        pending_times = [
+            datetime.fromisoformat(i["scheduled_at"]) for i in existing if i["status"] == "queued"
+        ]
+        start = (
+            datetime.fromisoformat(req.start_at) if req.start_at
+            else datetime.now(timezone.utc)
+        )
+        next_slot = max([start, *pending_times]) if pending_times else start
+
+        added = []
+        for ref in req.items:
+            job_id, rank = ref.get("job_id"), ref.get("rank")
+            row = _manifest_row(job_id, rank)
+            if not row or row.get("status") != "success":
+                continue
+
+            entry = {
+                "id": uuid.uuid4().hex[:12],
+                "job_id": job_id,
+                "rank": rank,
+                "title": row.get("youtube_title_final") or row.get("title") or f"Clip {rank}",
+                "video_path": row.get("video_path"),
+                "thumbnail_url": f"/api/outputs/{job_id}/{os.path.basename(row.get('thumbnail_path') or '')}"
+                if row.get("thumbnail_path") else None,
+                "privacy_status": req.privacy_status,
+                "added_at": datetime.now(timezone.utc).isoformat(),
+                "scheduled_at": next_slot.isoformat(),
+                "status": "queued",
+                "youtube_video_id": None,
+                "youtube_url": None,
+                "error": None,
+            }
+            existing.append(entry)
+            added.append(entry)
+            next_slot = next_slot + timedelta(hours=req.interval_hours)
+
+        _save_queue(existing)
+
+    return {"added": added}
+
+
+@router.delete("/queue/{item_id}")
+async def remove_from_queue(item_id: str):
+    with _queue_lock:
+        items = _load_queue()
+        remaining = [i for i in items if i["id"] != item_id]
+        if len(remaining) == len(items):
+            raise HTTPException(404, "Queue item not found.")
+        _save_queue(remaining)
+    return {"removed": item_id}
+
+
+@router.post("/queue/{item_id}/upload-now")
+async def upload_queue_item_now(item_id: str):
+    with _queue_lock:
+        items = _load_queue()
+        found = next((i for i in items if i["id"] == item_id), None)
+        if not found:
+            raise HTTPException(404, "Queue item not found.")
+        if found["status"] not in ("queued", "failed"):
+            raise HTTPException(409, f"Item is already {found['status']}.")
+        found["scheduled_at"] = datetime.now(timezone.utc).isoformat()
+        found["status"] = "queued"
+        _save_queue(items)
+    return {"ok": True}
+
+
+def _upload_one_queue_item(entry: dict) -> None:
+    """Upload a single queued clip; mutates *entry* in place with the result."""
+    try:
+        youtube = get_youtube_service(TOKEN_FILE)
+        row = _manifest_row(entry["job_id"], entry["rank"])
+        if not row:
+            raise RuntimeError("The source job's render_manifest.json is gone.")
+        result = upload_video_to_youtube(
+            youtube, row, publish_at_local=None, privacy_status=entry["privacy_status"]
+        )
+        entry.update(
+            status="uploaded",
+            youtube_video_id=result["video_id"],
+            youtube_url=result["youtube_url"],
+            error=None,
+        )
+        print(f"[YouTube queue] Uploaded {entry['title']!r} -> {result['youtube_url']}")
+    except Exception as e:
+        entry.update(status="failed", error=str(e))
+        print(f"[YouTube queue] Upload failed for {entry['title']!r}: {e}")
+
+
+def _scheduler_tick() -> None:
+    """Upload at most one due item per tick, so uploads stay serialized."""
+    with _queue_lock:
+        items = _load_queue()
+        now = datetime.now(timezone.utc)
+        due = next(
+            (
+                i for i in sorted(items, key=lambda i: i["scheduled_at"])
+                if i["status"] == "queued" and datetime.fromisoformat(i["scheduled_at"]) <= now
+            ),
+            None,
+        )
+        if due is None:
+            return
+        due["status"] = "uploading"
+        _save_queue(items)
+
+    _upload_one_queue_item(due)
+
+    with _queue_lock:
+        items = _load_queue()
+        for i, item in enumerate(items):
+            if item["id"] == due["id"]:
+                items[i] = due
+                break
+        _save_queue(items)
+
+
+def _scheduler_loop() -> None:
+    while True:
+        try:
+            _scheduler_tick()
+        except Exception as e:
+            print(f"[YouTube queue] Scheduler tick failed: {e}")
+        time.sleep(30)
+
+
+threading.Thread(target=_scheduler_loop, daemon=True).start()

@@ -16,6 +16,14 @@ from .. import worker
 
 router = APIRouter(tags=["settings"])
 
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+COOKIES_FILE = os.path.join(PROJECT_ROOT, ".credentials", "cookies.txt")
+
+# A cookies.txt saved in an earlier session (e.g. persisted via Google Drive on
+# Colab) should be picked up without having to re-paste it through Settings.
+if os.path.exists(COOKIES_FILE):
+    worker.set_settings_env({"YTDLP_COOKIES_FILE": COOKIES_FILE})
+
 
 def _check_gpu() -> bool:
     """Check if CUDA GPU is available."""
@@ -61,6 +69,7 @@ async def get_settings() -> SettingsResponse:
         default_whisper_model=env.get("DEFAULT_WHISPER_MODEL", "large-v3"),
         default_whisper_device=env.get("DEFAULT_WHISPER_DEVICE", "cuda"),
         default_ai_provider=env.get("DEFAULT_AI_PROVIDER", "gemini"),
+        youtube_cookies_set=os.path.exists(COOKIES_FILE),
         gpu_available=_check_gpu(),
     )
 
@@ -78,6 +87,11 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
         env_updates["HF_TOKEN"] = req.hf_token
     if req.nvidia_api_key is not None:
         env_updates["NVIDIA_API_KEY"] = req.nvidia_api_key
+    if req.youtube_cookies is not None:
+        os.makedirs(os.path.dirname(COOKIES_FILE), exist_ok=True)
+        with open(COOKIES_FILE, "w", encoding="utf-8") as f:
+            f.write(req.youtube_cookies)
+        env_updates["YTDLP_COOKIES_FILE"] = COOKIES_FILE
     if req.default_clips is not None:
         env_updates["DEFAULT_CLIPS"] = str(req.default_clips)
     if req.default_ratio is not None:

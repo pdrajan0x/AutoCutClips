@@ -177,6 +177,23 @@
                             </div>
                         </div>
 
+                        <!-- YouTube Cookies -->
+                        <div class="glass-card p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm">
+                            <h3 class="font-display font-semibold text-base text-slate-900 dark:text-white mb-2 flex items-center gap-2">
+                                <i data-lucide="cookie" class="w-5 h-5 text-brand-500"></i> YouTube Cookies
+                                <span id="cookies-badge" class="hidden text-emerald-500 text-[10px] font-bold">✅ SET</span>
+                            </h3>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                                Kaggle/Colab IPs often get YouTube's "Sign in to confirm you're not a bot" error when downloading.
+                                Export <code class="px-1 rounded bg-slate-100 dark:bg-slate-800">cookies.txt</code> (Netscape format) from a
+                                browser logged in to YouTube — e.g. the
+                                <a href="https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc" target="_blank" rel="noopener" class="text-brand-500 hover:underline">Get cookies.txt LOCALLY</a>
+                                extension — and paste its full contents below. Applies to every job started while this backend session is running.
+                            </p>
+                            <textarea id="input-youtube-cookies" rows="4" placeholder="# Netscape HTTP Cookie File&#10;.youtube.com	TRUE	/	TRUE	...	...	..."
+                                class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-500/50 placeholder-slate-400 text-slate-900 dark:text-white"></textarea>
+                        </div>
+
                         <!-- System Info -->
                         <div class="glass-card p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm">
                             <h3 class="font-display font-semibold text-base text-slate-900 dark:text-white mb-5 flex items-center gap-2">
@@ -282,6 +299,7 @@
                 if (settings.pexels_api_key_set) document.getElementById('pexels-badge').classList.remove('hidden');
                 if (settings.hf_token_set) document.getElementById('hf-badge').classList.remove('hidden');
                 if (settings.nvidia_api_key_set) document.getElementById('nvidia-badge').classList.remove('hidden');
+                if (settings.youtube_cookies_set) document.getElementById('cookies-badge').classList.remove('hidden');
 
                 // System info
                 document.getElementById('sys-gpu').innerHTML = settings.gpu_available
@@ -317,11 +335,13 @@
                 const pexelsKey = document.getElementById('input-pexels-key').value;
                 const hfToken = document.getElementById('input-hf-token').value;
                 const nvidiaKey = document.getElementById('input-nvidia-key').value;
+                const youtubeCookies = document.getElementById('input-youtube-cookies').value;
 
                 if (googleKey) payload.google_api_key = googleKey;
                 if (pexelsKey) payload.pexels_api_key = pexelsKey;
                 if (hfToken) payload.hf_token = hfToken;
                 if (nvidiaKey) payload.nvidia_api_key = nvidiaKey;
+                if (youtubeCookies) payload.youtube_cookies = youtubeCookies;
 
                 if (Object.keys(payload).length === 0) {
                     msg.className = 'text-sm mb-4 text-amber-500';
@@ -337,6 +357,7 @@
                 document.getElementById('input-pexels-key').value = '';
                 document.getElementById('input-hf-token').value = '';
                 document.getElementById('input-nvidia-key').value = '';
+                document.getElementById('input-youtube-cookies').value = '';
 
                 msg.className = 'text-sm mb-4 text-emerald-500';
                 msg.textContent = '✅ Settings updated';
