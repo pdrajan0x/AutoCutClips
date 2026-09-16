@@ -140,6 +140,42 @@ def parse_youtube_json3_subs(
         return "", []
 
 
+def _resolve_compute_type(device: str, compute_type: str) -> str:
+    """
+    Return a compute type the resolved *device* actually supports.
+
+    float16 is GPU-only (no CPU backend implements FP16 matmul), so a run that
+    lands on the CPU with the float16 default dies in ctranslate2 with
+    "Requested float16 compute type, but the target device or backend do not
+    support efficient float16 computation". int8 has the same problem on older
+    GPUs, so rather than hardcoding a replacement, ask ctranslate2 what this
+    machine supports and fall back to its own "auto" if the answer is unclear.
+    """
+    try:
+        import ctranslate2
+
+        supported = ctranslate2.get_supported_compute_types(device)
+    except Exception:
+        # Without the capability query, only the rule that always holds is safe.
+        if device == "cpu" and "float16" in compute_type:
+            print("      ℹ️ float16 needs a GPU; using int8 on the CPU instead.", flush=True)
+            return "int8"
+        return compute_type
+
+    if compute_type in supported or compute_type in ("auto", "default"):
+        return compute_type
+
+    # int8 is the fastest and lightest of the usual CPU types, so prefer it when
+    # available; "auto" is ctranslate2 picking the best supported type itself.
+    replacement = "int8" if "int8" in supported else "auto"
+    print(
+        f"      ℹ️ {compute_type} is not supported on this {device} "
+        f"(supported: {', '.join(sorted(supported))}); using {replacement} instead.",
+        flush=True,
+    )
+    return replacement
+
+
 def transcribe_video(
     video_path: str,
     max_words_per_subtitle: int = 5,
@@ -184,17 +220,7 @@ def transcribe_video(
             )
             device = "cpu"
 
-    # Checked against the resolved device rather than inside a fallback branch:
-    # float16 needs a GPU, so ending up on the CPU by *any* route (auto-detect,
-    # fallback, or an explicit --whisper-device cpu) must drop it, or
-    # ctranslate2 raises "Requested float16 compute type, but the target device
-    # or backend do not support efficient float16 computation".
-    if device == "cpu" and "float16" in compute_type:
-        print(
-            f"      ℹ️ {compute_type} needs a GPU; using int8 on the CPU instead.",
-            flush=True,
-        )
-        compute_type = "int8"
+    compute_type = _resolve_compute_type(device, compute_type)
 
     if device == "cpu" and model_size.startswith("large"):
         print(
