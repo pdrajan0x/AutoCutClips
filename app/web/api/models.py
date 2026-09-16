@@ -122,6 +122,12 @@ class JobCreateRequest(BaseModel):
     whisper_compute_type: Optional[str] = None
     use_dlp_subs: Optional[bool] = None
 
+    # Auto-upload to YouTube once the clips are rendered. Handled by the web
+    # worker rather than the clipping config, so these are not CLI options.
+    auto_upload_youtube: Optional[bool] = None
+    auto_upload_interval_hours: Optional[float] = Field(None, ge=0, le=168)
+    auto_upload_privacy: Optional[str] = Field(None, pattern="^(public|unlisted|private)$")
+
     # AI
     ai_provider: Optional[AIProvider] = None
     gemini_model: Optional[str] = None

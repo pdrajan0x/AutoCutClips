@@ -442,32 +442,33 @@ async def get_queue():
     return {"items": sorted(items, key=_scheduled_at)}
 
 
-@router.post("/queue")
-async def add_to_queue(req: QueueAddRequest):
-    if not req.items:
-        raise HTTPException(400, "No clips selected.")
-    if req.privacy_status not in ("public", "unlisted", "private"):
-        raise HTTPException(400, "privacy_status must be public, unlisted or private.")
+def enqueue_clips(
+    refs: list[dict],
+    interval_hours: float,
+    privacy_status: str,
+    start_at: datetime | None = None,
+) -> list[dict]:
+    """
+    Add {"job_id", "rank"} references to the upload queue, spaced by *interval_hours*.
 
+    New items are scheduled after anything already waiting, so queueing a second
+    batch does not publish two clips at the same moment.
+    """
     with _queue_lock:
         existing = _load_queue()
-        pending_times = [
-            _scheduled_at(i) for i in existing if i.get("status") == "queued"
-        ]
-        try:
-            start = (
-                datetime.fromisoformat(req.start_at) if req.start_at
-                else datetime.now(timezone.utc)
-            )
-        except ValueError:
-            raise HTTPException(400, "start_at must be an ISO datetime, e.g. 2026-09-15T18:00:00Z")
+        pending_times = [_scheduled_at(i) for i in existing if i.get("status") == "queued"]
+        start = start_at or datetime.now(timezone.utc)
         if not start.tzinfo:
             start = start.replace(tzinfo=timezone.utc)
         next_slot = max([start, *pending_times]) if pending_times else start
 
+        already = {(i["job_id"], i["rank"]) for i in existing if i.get("status") != "failed"}
+
         added = []
-        for ref in req.items:
+        for ref in refs:
             job_id, rank = ref.get("job_id"), ref.get("rank")
+            if (job_id, rank) in already:
+                continue
             row = _manifest_row(job_id, rank)
             if not row or row.get("status") != "success":
                 continue
@@ -480,7 +481,7 @@ async def add_to_queue(req: QueueAddRequest):
                 "video_path": row.get("video_path"),
                 "thumbnail_url": f"/api/outputs/{job_id}/{os.path.basename(row.get('thumbnail_path') or '')}"
                 if row.get("thumbnail_path") else None,
-                "privacy_status": req.privacy_status,
+                "privacy_status": privacy_status,
                 "added_at": datetime.now(timezone.utc).isoformat(),
                 "scheduled_at": next_slot.isoformat(),
                 "status": "queued",
@@ -490,10 +491,39 @@ async def add_to_queue(req: QueueAddRequest):
             }
             existing.append(entry)
             added.append(entry)
-            next_slot = next_slot + timedelta(hours=req.interval_hours)
+            next_slot = next_slot + timedelta(hours=interval_hours)
 
         _save_queue(existing)
 
+    return added
+
+
+def enqueue_job_clips(job_id: str, interval_hours: float, privacy_status: str) -> list[dict]:
+    """Queue every successfully rendered clip of *job_id*, best first."""
+    rows = [r for r in _manifest_rows(job_id) if r.get("status") == "success"]
+    rows.sort(key=lambda r: r.get("viral_score") or 0, reverse=True)
+    return enqueue_clips(
+        [{"job_id": job_id, "rank": r.get("rank")} for r in rows],
+        interval_hours,
+        privacy_status,
+    )
+
+
+@router.post("/queue")
+async def add_to_queue(req: QueueAddRequest):
+    if not req.items:
+        raise HTTPException(400, "No clips selected.")
+    if req.privacy_status not in ("public", "unlisted", "private"):
+        raise HTTPException(400, "privacy_status must be public, unlisted or private.")
+
+    start = None
+    if req.start_at:
+        try:
+            start = datetime.fromisoformat(req.start_at)
+        except ValueError:
+            raise HTTPException(400, "start_at must be an ISO datetime, e.g. 2026-09-15T18:00:00Z")
+
+    added = enqueue_clips(req.items, req.interval_hours, req.privacy_status, start)
     return {"added": added}
 
 

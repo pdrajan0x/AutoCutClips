@@ -70,6 +70,40 @@ def _clip_details(job_id: str, render_manifest: list[dict]) -> list[ClipDetail]:
     return clips
 
 
+def _auto_upload(job_id: str, payload: dict) -> None:
+    """
+    Queue this job's clips for YouTube once rendering finishes.
+
+    Queueing (rather than uploading here) means the clips are spaced by the
+    chosen interval and remain visible and cancellable on the YouTube page.
+    A failure must never fail the clipping job, whose output is already safe.
+    """
+    # Imported here: the route module owns the queue, and importing it at module
+    # scope would make worker <-> routes a cycle.
+    from .routes.youtube import enqueue_job_clips
+
+    try:
+        added = enqueue_job_clips(
+            job_id,
+            float(payload.get("auto_upload_interval_hours") or 2.0),
+            payload.get("auto_upload_privacy") or "public",
+        )
+        message = (
+            f"Queued {len(added)} clip(s) for YouTube upload."
+            if added else "No clips were queued for upload."
+        )
+        store.update_progress(
+            job_id, step="upload", step_number=7, total_steps=7, message=message, percent=100.0
+        )
+        print(f"[Worker] {job_id}: {message}")
+    except Exception as e:
+        store.update_progress(
+            job_id, step="upload", step_number=7, total_steps=7,
+            message=f"Auto-upload could not be queued: {e}", percent=100.0,
+        )
+        print(f"[Worker] {job_id}: auto-upload queueing failed: {e}", file=sys.stderr)
+
+
 def _run_pipeline_sync(job_id: str, payload: dict) -> None:
     """Run the clipping pipeline on a worker thread, reporting into the job store."""
     from ...clipping.runner import run_pipeline
@@ -114,6 +148,9 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
 
         render_manifest = run_pipeline(cfg, on_progress=on_progress)
         store.set_clips(job_id, _clip_details(job_id, render_manifest))
+
+        if payload.get("auto_upload_youtube"):
+            _auto_upload(job_id, payload)
 
     except Exception as exc:
         error_msg = f"{type(exc).__name__}: {exc}"
