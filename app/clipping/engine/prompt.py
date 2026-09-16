@@ -14,6 +14,7 @@ Studio renderers read them by name, so a rename must be applied in all of them.
 import json
 import os
 
+from ..bgm_moods import BGM_MOOD_GUIDE
 from ..channel_learning import build_learning_section
 
 # ==============================================================================
@@ -309,6 +310,10 @@ def _json_structure(cfg, accounts: dict) -> str:
     return "[\n  {\n" + "\n".join(lines) + "\n  }\n]"
 
 
+def _bgm_mood_lines() -> str:
+    return "\n".join(f"  - {mood}: {use}" for mood, use in BGM_MOOD_GUIDE.items())
+
+
 def get_analysis_prompt(
     transcript: str, clip_count: int, hook_duration: int, cfg=None
 ) -> str:
@@ -448,9 +453,10 @@ VISUAL B-ROLL HOOK (REFERENCE ONLY):
 - Include a search keyword for each. This goes in 'recommended_visual_broll_hook' and is never rendered automatically.
 
 BGM MOOD (BACKGROUND MUSIC):
-- The music sits quietly under the voice. Pick ONE mood from this fixed list: [chill, epic, sad, upbeat, suspense].
-- Match the emotional tone, not the topic: calm advice or discussion = chill; ambition, triumph or big stakes = epic;
-  loss, struggle or regret = sad; light, funny or energetic = upbeat; mystery, danger or a reveal = suspense.
+- The music sits quietly under the voice. Pick ONE mood from this fixed list, matching the emotional tone
+  of the clip rather than its topic:
+{_bgm_mood_lines()}
+- When in doubt between two moods, pick the calmer one; never pick 'scary' or 'sad' for a light or funny clip.
 
 SELECTION REASONING:
 - Fill 'reason' with 1-2 sentences: the hook shape, why a stranger stays to the end, and what the payoff is.

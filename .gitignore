@@ -38,3 +38,7 @@ uploads/
 
 # YouTube Tracker local database
 youtube_tracker/*.sqlite3
+
+# Background-music library: fetched on demand from assets/bgm/library.json
+assets/bgm/*/mixkit-*.mp3
+assets/bgm/*/*.part

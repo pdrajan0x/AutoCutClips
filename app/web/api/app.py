@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -41,6 +42,18 @@ async def lifespan(app: FastAPI):
             "      'Requested format is not available'. Fix it with:\n"
             "      python -m app.clipping.jsruntime"
         )
+
+    # Fetch the background-music library in the background, so the first
+    # render doesn't stall on ~500 MB of downloads. Renders still fetch a
+    # missing mood on demand if this hasn't finished.
+    def _prefetch_bgm():
+        try:
+            from ...clipping.studio.bgm_library import main as fetch_bgm_library
+            fetch_bgm_library()
+        except Exception as e:
+            print(f"   ⚠️ Background-music prefetch failed: {e}")
+
+    threading.Thread(target=_prefetch_bgm, daemon=True).start()
 
     yield
     print("👋 Backend shutting down...")

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import threading
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 
@@ -17,10 +18,14 @@ from . import store
 from .config_adapter import build_config_from_payload
 from .models import ClipDetail, JobStatus
 
-# Semaphore to cap the number of concurrently running jobs.
-MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "1"))
-_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
-_executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS)
+# How many jobs run at once. Adjustable at runtime from Settings, so the pool is
+# sized for the ceiling and a resizable slot gate enforces the current limit;
+# jobs beyond it wait in the "queued" state.
+MAX_CONCURRENT_JOBS_CEILING = 8
+_max_concurrent = max(1, min(MAX_CONCURRENT_JOBS_CEILING, int(os.environ.get("MAX_CONCURRENT_JOBS", "2"))))
+_running = 0
+_slots = threading.Condition()
+_executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS_CEILING)
 # The event loop only holds weak references to tasks, so an in-flight job can be
 # garbage-collected mid-run unless we keep a strong reference ourselves.
 _background_tasks: set[asyncio.Task] = set()
@@ -45,6 +50,18 @@ def set_settings_env(env: dict[str, str]) -> None:
 def get_settings_env() -> dict[str, str]:
     """Return a copy of the current settings environment."""
     return dict(_settings_env)
+
+
+def get_max_concurrent_jobs() -> int:
+    return _max_concurrent
+
+
+def set_max_concurrent_jobs(limit: int) -> None:
+    """Change how many jobs may run at once; waiting jobs start immediately if raised."""
+    global _max_concurrent
+    with _slots:
+        _max_concurrent = max(1, min(MAX_CONCURRENT_JOBS_CEILING, int(limit)))
+        _slots.notify_all()
 
 
 def _clip_details(job_id: str, render_manifest: list[dict]) -> list[ClipDetail]:
@@ -83,9 +100,12 @@ def _auto_upload(job_id: str, payload: dict) -> None:
     from .routes.youtube import enqueue_job_clips
 
     try:
+        minutes = payload.get("auto_upload_interval_minutes")
+        if minutes is None and payload.get("auto_upload_interval_hours") is not None:
+            minutes = float(payload["auto_upload_interval_hours"]) * 60
         added = enqueue_job_clips(
             job_id,
-            float(payload.get("auto_upload_interval_hours") or 2.0),
+            float(60 if minutes is None else minutes),
             payload.get("auto_upload_privacy") or "public",
         )
         message = (
@@ -166,17 +186,34 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
         print(f"[Worker] Job {job_id} failed:\n{traceback.format_exc()}", file=sys.stderr)
 
 
+def _run_when_slot_free(job_id: str, payload: dict) -> None:
+    """Wait for a free slot (the job stays "queued"), then run the pipeline."""
+    global _running
+    with _slots:
+        while _running >= _max_concurrent:
+            _slots.wait()
+        _running += 1
+    try:
+        # Deleted while it was waiting for a slot: nothing to run.
+        if store.get_job(job_id) is None:
+            return
+        _run_pipeline_sync(job_id, payload)
+    finally:
+        with _slots:
+            _running -= 1
+            _slots.notify_all()
+
+
 async def submit_job(job_id: str, payload: dict) -> None:
     """
     Submit a job to the background worker queue.
 
-    A semaphore limits concurrency and the pipeline runs in a thread pool so the
-    asyncio event loop is never blocked.
+    Up to the configured number of jobs run in parallel on a thread pool, so
+    the asyncio event loop (and the YouTube upload scheduler) are never blocked.
     """
     async def _run():
-        async with _semaphore:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(_executor, _run_pipeline_sync, job_id, payload)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(_executor, _run_when_slot_free, job_id, payload)
 
     task = asyncio.create_task(_run())
     _background_tasks.add(task)

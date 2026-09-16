@@ -139,7 +139,7 @@ python -m app.cli --url "https://youtube.com/watch?v=VIDEO_ID"
 # Standard run (Default options with 5 clips)
 python -m app.cli --url "https://youtube.com/watch?v=VIDEO_ID" --clips 5 --ratio 16:9
 
-# Prefer highest available source quality (default behavior)
+# Prefer the highest available source quality (the default is 1080p)
 python -m app.cli --url "https://youtube.com/watch?v=VIDEO_ID" --source-height max
 
 # Cap source download to 1440p (2K)
@@ -240,7 +240,7 @@ python -m app.cli --help
 | `--clips`, `-n` | `7` | Maximum number of clips (fewer when a video has fewer great moments) |
 | `--ratio`, `-r` | `9:16` | Output aspect ratio (`9:16`, `16:9`, `1:1`, `3:4`, `4:5`) |
 | `--min-duration` / `--max-duration` | `30` / `80` | Clip length bounds in seconds (5-180) |
-| `--source-height` | `max` | Preferred source download max height (`max`, `1080`, `1440`, `2160`, etc.) |
+| `--source-height` | `1080` | Preferred source download max height (`max`, `1080`, `1440`, `2160`, etc.) |
 | `--ai-provider` | `gemini` | AI provider for analysis (`gemini` or `nvidia`). |
 | `--nvidia-model` | `deepseek...` | Model name for NVIDIA NIM API (e.g. `deepseek-ai/deepseek-v3`). |
 | `--render-height` | `1080` | Target render output height (`1080`, `1440`, `2160`, `source`) |
@@ -283,7 +283,7 @@ python -m app.cli --help
 | `--static-crop` | `False` | Disable face tracking and use static center crop for `1:1`, `3:4`, and `4:5` formats |
 | `--yolo-size` | `8m` | YOLO face track model (`8n`, `8s`, `8m`, `8n_v2`, `9c`) |
 | `--whisper-model` | `large-v3` | Whisper model size ([see here](https://github.com/SYSTRAN/faster-whisper?tab=readme-ov-file#whisper) for options) |
-| `--whisper-device` | `cuda` | Whisper device (`cuda`, `cpu`, `auto`) |
+| `--whisper-device` | `auto` | Whisper device (`auto` = GPU if available, else CPU; `cuda`, `cpu`) |
 | `--whisper-compute-type` | `float16` | Compute type for Whisper (`float32`, `float16`, `int8`, etc.) |
 | `--gemini-model` | `gemini-3-flash-preview` | Gemini model name |
 | `--gemini-fallback-model` | `gemini-2.5-flash` | Gemini fallback model name if main model fails |

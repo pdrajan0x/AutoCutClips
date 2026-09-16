@@ -48,6 +48,9 @@ def base_opts(cfg=None, **extra) -> dict:
         # Solving YouTube's challenges needs the EJS solver script as well as a
         # runtime to execute it; without this yt-dlp refuses to fetch it.
         "remote_components": ["ejs:github"],
+        # A "watch?v=...&list=..." link is one video; playlists are expanded
+        # into separate jobs by the web API instead.
+        "noplaylist": True,
     }
     cookies = resolve_cookies_file(cfg)
     if cookies:

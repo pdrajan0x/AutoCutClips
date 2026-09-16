@@ -7,6 +7,8 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime
+from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -67,7 +69,7 @@ async def create_job(req: JobCreateRequest) -> JobResponse:
             detail="Either 'url', 'upload_filename', or 'reuse_job_id' must be provided.",
         )
 
-    payload = req.model_dump()
+    payload = req.model_dump(exclude={"playlist", "playlist_limit"})
     # Convert enums to string values for JSON serialization
     for key, value in payload.items():
         if hasattr(value, "value"):
@@ -94,6 +96,92 @@ async def create_job(req: JobCreateRequest) -> JobResponse:
 
     job = store.get_job(job_id)
     return _job_to_response(job)
+
+
+def _playlist_url(url: str) -> str | None:
+    """
+    The canonical playlist URL for a YouTube link carrying ``list=``, else None.
+
+    A "watch?v=...&list=..." link is rewritten to the playlist page so the whole
+    list is expanded rather than the single video it happens to point at.
+    """
+    parsed = urlparse(url.strip())
+    list_id = (parse_qs(parsed.query).get("list") or [None])[0]
+    if list_id and ("youtube.com" in parsed.netloc or "youtu.be" in parsed.netloc):
+        return f"https://www.youtube.com/playlist?list={list_id}"
+    return None
+
+
+def _expand_playlist(url: str, limit: int | None) -> tuple[str, list[str]]:
+    """List the video URLs of a playlist (or channel page) without downloading anything."""
+    import yt_dlp
+
+    from ....clipping import ytdl
+
+    cookies = worker.get_settings_env().get("YTDLP_COOKIES_FILE")
+    opts = ytdl.base_opts(
+        SimpleNamespace(cookies_file=cookies),
+        extract_flat="in_playlist",
+        skip_download=True,
+        noplaylist=False,
+    )
+    if limit:
+        opts["playlistend"] = limit
+
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(_playlist_url(url) or url, download=False) or {}
+
+    urls: list[str] = []
+    for entry in info.get("entries") or []:
+        if not entry:
+            continue
+        # Private/deleted playlist entries have no usable ID.
+        title = (entry.get("title") or "").strip().lower()
+        if title in ("[private video]", "[deleted video]"):
+            continue
+        video_url = entry.get("url") or ""
+        if entry.get("id") and not video_url.startswith("http"):
+            video_url = f"https://www.youtube.com/watch?v={entry['id']}"
+        if video_url and video_url not in urls:
+            urls.append(video_url)
+    return info.get("title") or "Playlist", urls[:limit] if limit else urls
+
+
+@router.post("/playlist", status_code=201)
+async def create_playlist_jobs(req: JobCreateRequest) -> dict:
+    """
+    Create one job per video in a playlist, all with the same settings.
+
+    The jobs join the normal queue, so they run as many at a time as the
+    concurrency setting allows, and each one auto-uploads on its own if asked.
+    """
+    if not req.url:
+        raise HTTPException(status_code=400, detail="A playlist URL is required.")
+
+    try:
+        title, urls = await asyncio.get_running_loop().run_in_executor(
+            None, _expand_playlist, req.url, req.playlist_limit
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read the playlist: {e}")
+    if not urls:
+        raise HTTPException(status_code=400, detail="No playable videos were found in that playlist.")
+
+    base = req.model_dump(exclude={"reuse_job_id", "playlist", "playlist_limit", "upload_filename"})
+    for key, value in base.items():
+        if hasattr(value, "value"):
+            base[key] = value.value
+    if base.get("load_gemini_json") is None:
+        base["load_gemini_json"] = False
+
+    jobs = []
+    for video_url in urls:
+        payload = dict(base, url=video_url)
+        job_id = store.create_job(url=video_url, source=base.get("source") or "youtube", config=payload)
+        await worker.submit_job(job_id, payload)
+        jobs.append(_job_to_response(store.get_job(job_id)))
+
+    return {"playlist_title": title, "count": len(jobs), "jobs": jobs}
 
 
 @router.get("")

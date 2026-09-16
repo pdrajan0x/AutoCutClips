@@ -9,6 +9,7 @@ import json
 import re
 import time
 
+from ..bgm_moods import BGM_MOODS
 from .prompt import get_analysis_prompt, load_target_accounts
 
 # ==============================================================================
@@ -146,7 +147,7 @@ def _build_clip_schema(cfg, *, uppercase: bool) -> dict:
         "hook_end_time": num,
         "hook_text": text,
         "on_screen_hook": text,
-        "bgm_mood": enum(["chill", "epic", "sad", "upbeat", "suspense"]),
+        "bgm_mood": enum(BGM_MOODS),
         "typography_plan": array(
             obj(
                 {
@@ -314,6 +315,55 @@ def analyze_with_gemini(transcript: str, cfg) -> list[dict]:
     return _unwrap_clip_list(parsed, "Gemini")
 
 
+MERGE_WINDOW_SECONDS = 600
+MERGE_PARALLEL_CALLS = 3
+_TRANSCRIPT_LINE = re.compile(r"^\s*\[\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*\]")
+
+
+def _split_transcript_windows(transcript: str, window: float) -> dict[int, list[str]]:
+    """Bucket '[start - end] text' lines by which *window*-second slice they start in."""
+    buckets: dict[int, list[str]] = {}
+    for line in transcript.splitlines():
+        match = _TRANSCRIPT_LINE.match(line)
+        if match:
+            buckets.setdefault(int(float(match.group(1)) // window), []).append(line.strip())
+    return buckets
+
+
+def _merge_window(client, cfg, types, whisper_lines: list[str], youtube_lines: list[str]) -> str | None:
+    """Merge one time window; None when the reply is unusable."""
+    prompt = (
+        "You are given two independent transcripts of the SAME stretch of a video, each "
+        "with [start - end] timestamps in seconds. One is from an ASR model (Whisper), the "
+        "other is YouTube's own captions. They can disagree on wording, have different line "
+        "breaks, or one can be missing lines the other has.\n\n"
+        "Produce ONE merged transcript that is the most accurate reading of what is actually "
+        "said/sung, keeping the same '[start - end] text' line format and the Whisper "
+        "timestamps as the timing backbone (do not invent new timestamps). Prefer whichever "
+        "source's wording is clearer or more complete for each line; if a line appears in "
+        "only one source, keep it. Output ONLY the transcript lines — no commentary, no "
+        "headings, no code fences.\n\n"
+        "=== WHISPER TRANSCRIPT ===\n" + "\n".join(whisper_lines) + "\n\n"
+        "=== YOUTUBE CAPTIONS ===\n" + "\n".join(youtube_lines) + "\n"
+    )
+    config = types.GenerateContentConfig(temperature=0.2, max_output_tokens=32768)
+
+    for model in dict.fromkeys(filter(None, (cfg.gemini_model, getattr(cfg, "gemini_fallback_model", None)))):
+        try:
+            response = client.models.generate_content(model=model, contents=prompt, config=config)
+            finish = str(getattr((response.candidates or [None])[0], "finish_reason", "") or "")
+            lines = [l.strip() for l in (response.text or "").splitlines() if _TRANSCRIPT_LINE.match(l)]
+            # A reply cut off by the token limit, or one that silently dropped most
+            # lines, is worse than Whisper's own text for this window.
+            if "MAX_TOKENS" in finish or len(lines) < 0.6 * len(whisper_lines):
+                print(f"   ⚠️ Merge window from {model} was incomplete ({len(lines)}/{len(whisper_lines)} lines).")
+                continue
+            return "\n".join(lines)
+        except Exception as e:
+            print(f"   ⚠️ Merge window failed on {model}: {e}")
+    return None
+
+
 def merge_transcripts_with_ai(whisper_transcript: str, youtube_transcript: str, cfg) -> str:
     """
     Ask Gemini to reconcile the Whisper transcript with YouTube's own captions
@@ -325,64 +375,50 @@ def merge_transcripts_with_ai(whisper_transcript: str, youtube_transcript: str, 
     other's timestamps rather than trusting either one alone. Word-level
     timing used for rendering still comes from Whisper's own segments — this
     only improves the text Gemini reasons over when picking clips.
+
+    The merge runs in fixed time windows: a long video's full transcript is
+    bigger than one reply can hold, and a single JSON reply cut off mid-string
+    used to fail the whole merge. Each window that fails keeps Whisper's text.
     """
+    from concurrent.futures import ThreadPoolExecutor
+
     import google.genai as genai
     from google.genai import types
 
-    print("[3/4] Merging the Whisper transcript with YouTube's captions...")
+    whisper_windows = _split_transcript_windows(whisper_transcript, MERGE_WINDOW_SECONDS)
+    youtube_windows = _split_transcript_windows(youtube_transcript, MERGE_WINDOW_SECONDS)
+    if not whisper_windows:
+        return whisper_transcript
+
+    keys = sorted(whisper_windows)
+    print(f"[3/4] Merging the Whisper transcript with YouTube's captions ({len(keys)} window(s))...")
 
     client = genai.Client(
         api_key=cfg.api_key_gemini,
         http_options=types.HttpOptions(
-            timeout=REQUEST_TIMEOUT_MS,
-            retry_options=types.HttpRetryOptions(attempts=1),
+            timeout=5 * 60 * 1000,
+            retry_options=types.HttpRetryOptions(attempts=3),
         ),
     )
 
-    prompt = (
-        "You are given two independent transcripts of the SAME video, each with "
-        "[start - end] timestamps in seconds. One is from an ASR model (Whisper), "
-        "the other is YouTube's own captions. They can disagree on wording, have "
-        "different line breaks, or one can be missing lines the other has.\n\n"
-        "Produce ONE merged transcript that is the most accurate reading of what "
-        "is actually said/sung, keeping the same '[start - end] text' line format "
-        "and the Whisper timestamps as the timing backbone (do not invent new "
-        "timestamps). Prefer whichever source's wording is clearer or more "
-        "complete for each line; if a line appears in only one source, keep it. "
-        "Do not add commentary, only the merged transcript text.\n\n"
-        f"=== WHISPER TRANSCRIPT ===\n{whisper_transcript}\n\n"
-        f"=== YOUTUBE CAPTIONS ===\n{youtube_transcript}\n"
-    )
-
-    schema = {
-        "type": "OBJECT",
-        "properties": {"merged_transcript": {"type": "STRING"}},
-        "required": ["merged_transcript"],
-    }
-    config = types.GenerateContentConfig(
-        response_mime_type="application/json",
-        response_schema=schema,
-    )
+    def merge_key(key):
+        youtube_lines = youtube_windows.get(key)
+        if not youtube_lines:
+            return whisper_windows[key], False
+        merged = _merge_window(client, cfg, types, whisper_windows[key], youtube_lines)
+        return (merged.splitlines(), True) if merged else (whisper_windows[key], False)
 
     try:
-        # Merging only sharpens the transcript the clip picker reads, so it must
-        # not hold the pipeline hostage: the default retry ladder can burn ~30
-        # minutes before giving up, and falling back to Whisper alone is cheap.
-        parsed = _generate_json_with_retry(
-            client=client,
-            model=cfg.gemini_model,
-            fallback_model=getattr(cfg, "gemini_fallback_model", None),
-            contents=prompt,
-            config=config,
-            max_attempts=2,
-        )
-        merged = parsed.get("merged_transcript") if isinstance(parsed, dict) else None
-        if merged and merged.strip():
-            return merged
+        with ThreadPoolExecutor(max_workers=MERGE_PARALLEL_CALLS) as pool:
+            results = list(pool.map(merge_key, keys))
     except Exception as e:
+        # Merging only sharpens the text the clip picker reads; never fail the job over it.
         print(f"⚠️ Transcript merge failed ({e}); falling back to the Whisper transcript alone.")
+        return whisper_transcript
 
-    return whisper_transcript
+    merged_count = sum(1 for _, ok in results if ok)
+    print(f"✅ Merged {merged_count}/{len(keys)} window(s); the rest keep Whisper's text.")
+    return "\n".join(line for lines, _ in results for line in lines) + "\n"
 
 
 def analyze_with_ai(transcript: str, cfg) -> list[dict]:

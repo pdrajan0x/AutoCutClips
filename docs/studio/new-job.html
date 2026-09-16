@@ -110,7 +110,24 @@
                                 <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Video URL</label>
                                 <input id="input-url" type="url" placeholder="https://www.youtube.com/watch?v=..."
                                     class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500 placeholder-slate-400 text-slate-900 dark:text-white">
-                                <p class="text-xs text-slate-400 mt-1.5">Supports YouTube, TikTok, Instagram, Google Drive</p>
+                                <p class="text-xs text-slate-400 mt-1.5">Supports YouTube, TikTok, Instagram, Google Drive — and whole YouTube playlists</p>
+                            </div>
+                            <div class="mb-4 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-900/40">
+                                <div class="flex items-start justify-between gap-4">
+                                    <div>
+                                        <div class="text-sm font-semibold text-slate-900 dark:text-white">Process the Whole Playlist</div>
+                                        <div class="text-xs text-slate-400">Every video in the playlist becomes its own job with these same settings.</div>
+                                    </div>
+                                    <label class="toggle-switch flex-shrink-0">
+                                        <input type="checkbox" id="input-playlist" onchange="togglePlaylist()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div id="playlist-options" class="hidden mt-3 max-w-[220px]">
+                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Max Videos (blank = all)</label>
+                                    <input id="input-playlist-limit" type="number" min="1" max="500" placeholder="All"
+                                        class="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-900 dark:text-white">
+                                </div>
                             </div>
                             <div class="max-w-[200px]">
                                 <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Platform</label>
@@ -183,10 +200,10 @@
                                     <div>
                                         <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Source Quality</label>
                                         <select id="input-source-height" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-900 dark:text-white">
+                                            <option value="1080" selected>1080p</option>
                                             <option value="max">Max (highest available)</option>
                                             <option value="2160">2160p (4K)</option>
                                             <option value="1440">1440p (2K)</option>
-                                            <option value="1080">1080p</option>
                                             <option value="720">720p</option>
                                             <option value="480">480p</option>
                                         </select>
@@ -242,9 +259,9 @@
                                 <div>
                                     <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Device</label>
                                     <select id="input-device" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-900 dark:text-white">
+                                        <option value="auto" selected>Auto (GPU if available)</option>
                                         <option value="cuda">CUDA (GPU)</option>
                                         <option value="cpu">CPU</option>
-                                        <option value="auto">Auto</option>
                                     </select>
                                 </div>
                             </div>
@@ -279,8 +296,8 @@
 
                         <div id="auto-upload-options" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
                             <div>
-                                <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Interval Between Uploads (hours)</label>
-                                <input id="input-auto-upload-interval" type="number" min="0" step="0.5" value="2"
+                                <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Interval Between Uploads (minutes)</label>
+                                <input id="input-auto-upload-interval" type="number" min="0" step="1" value="60"
                                     class="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-900 dark:text-white">
                             </div>
                             <div>
@@ -351,6 +368,24 @@
             const on = document.getElementById('input-auto-upload').checked;
             document.getElementById('auto-upload-options').classList.toggle('hidden', !on);
         }
+
+        function togglePlaylist() {
+            const on = document.getElementById('input-playlist').checked;
+            document.getElementById('playlist-options').classList.toggle('hidden', !on);
+        }
+
+        // A link carrying list= is most likely meant as a playlist; suggest it
+        // until the user sets the switch themselves.
+        document.getElementById('input-url').addEventListener('input', (e) => {
+            const box = document.getElementById('input-playlist');
+            if (!box.dataset.touched) {
+                box.checked = /[?&]list=/.test(e.target.value);
+                togglePlaylist();
+            }
+        });
+        document.getElementById('input-playlist').addEventListener('change', (e) => {
+            e.target.dataset.touched = '1';
+        });
 
         function setMode(mode) {
             currentMode = mode;
@@ -426,9 +461,19 @@
 
                 if (document.getElementById('input-auto-upload').checked) {
                     payload.auto_upload_youtube = true;
-                    payload.auto_upload_interval_hours =
-                        parseFloat(document.getElementById('input-auto-upload-interval').value) || 0;
+                    const minutes = parseFloat(document.getElementById('input-auto-upload-interval').value);
+                    payload.auto_upload_interval_minutes = Number.isFinite(minutes) && minutes >= 0 ? minutes : 60;
                     payload.auto_upload_privacy = document.getElementById('input-auto-upload-privacy').value;
+                }
+
+                if (currentMode === 'url' && document.getElementById('input-playlist').checked) {
+                    const limit = parseInt(document.getElementById('input-playlist-limit').value);
+                    if (limit > 0) payload.playlist_limit = limit;
+                    btn.innerHTML = '<span class="spinner"></span> Reading playlist...';
+                    const result = await StudioAPI.createPlaylistJobs(payload);
+                    alert(`Queued ${result.count} video(s) from "${result.playlist_title}".`);
+                    window.location.href = 'index.html';
+                    return;
                 }
 
                 const job = await StudioAPI.createJob(payload);

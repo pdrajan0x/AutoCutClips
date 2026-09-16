@@ -1,0 +1,740 @@
+{
+  "chill": [
+    {
+      "id": 738,
+      "title": "Hip Hop 02",
+      "artist": "Lily J",
+      "url": "https://assets.mixkit.co/music/738/738.mp3"
+    },
+    {
+      "id": 130,
+      "title": "Tech House vibes",
+      "artist": "Alejandro Magaña (A. M.)",
+      "url": "https://assets.mixkit.co/music/130/130.mp3"
+    },
+    {
+      "id": 443,
+      "title": "Serene View",
+      "artist": "Arulo",
+      "url": "https://assets.mixkit.co/music/443/443.mp3"
+    },
+    {
+      "id": 132,
+      "title": "Hazy After Hours",
+      "artist": "Alejandro Magaña (A. M.)",
+      "url": "https://assets.mixkit.co/music/132/132.mp3"
+    },
+    {
+      "id": 400,
+      "title": "C.B.P.D",
+      "artist": "Arulo",
+      "url": "https://assets.mixkit.co/music/400/400.mp3"
+    },
+    {
+      "id": 839,
+      "title": "Tears of Joy",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/839/839.mp3"
+    },
+    {
+      "id": 695,
+      "title": "Pop 05",
+      "artist": "Grigoriy Nuzhny",
+      "url": "https://assets.mixkit.co/music/695/695.mp3"
+    },
+    {
+      "id": 1210,
+      "title": "Can't Get You Off My Mind",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/1210/1210.mp3"
+    }
+  ],
+  "calm": [
+    {
+      "id": 127,
+      "title": "Valley Sunset",
+      "artist": "Alejandro Magaña (A. M.)",
+      "url": "https://assets.mixkit.co/music/127/127.mp3"
+    },
+    {
+      "id": 292,
+      "title": "Relax Beat",
+      "artist": "Arulo",
+      "url": "https://assets.mixkit.co/music/292/292.mp3"
+    },
+    {
+      "id": 659,
+      "title": "Romantic",
+      "artist": "Francisco Alvear",
+      "url": "https://assets.mixkit.co/music/659/659.mp3"
+    },
+    {
+      "id": 749,
+      "title": "Relaxation 05",
+      "artist": "Lily J",
+      "url": "https://assets.mixkit.co/music/749/749.mp3"
+    },
+    {
+      "id": 615,
+      "title": "Tapis",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/615/615.mp3"
+    },
+    {
+      "id": 441,
+      "title": "Meditation",
+      "artist": "Arulo",
+      "url": "https://assets.mixkit.co/music/441/441.mp3"
+    },
+    {
+      "id": 571,
+      "title": "Voxscape",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/571/571.mp3"
+    },
+    {
+      "id": 607,
+      "title": "Forest Walk",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/607/607.mp3"
+    }
+  ],
+  "happy": [
+    {
+      "id": 1076,
+      "title": "Smile",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/1076/1076.mp3"
+    },
+    {
+      "id": 5,
+      "title": "Feeling Happy",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/5/5.mp3"
+    },
+    {
+      "id": 801,
+      "title": "Happy Home",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/801/801.mp3"
+    },
+    {
+      "id": 1072,
+      "title": "Owies Ukulele",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/1072/1072.mp3"
+    },
+    {
+      "id": 91,
+      "title": "Summer's Here",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/91/91.mp3"
+    },
+    {
+      "id": 621,
+      "title": "BRIDGE N° 98",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/621/621.mp3"
+    },
+    {
+      "id": 3,
+      "title": "Dance with Me",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/3/3.mp3"
+    },
+    {
+      "id": 822,
+      "title": "Banjo Man in Africa",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/822/822.mp3"
+    }
+  ],
+  "upbeat": [
+    {
+      "id": 32,
+      "title": "Driving Ambition",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/32/32.mp3"
+    },
+    {
+      "id": 623,
+      "title": "Deep Urban",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/623/623.mp3"
+    },
+    {
+      "id": 1167,
+      "title": "Close Up",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/1167/1167.mp3"
+    },
+    {
+      "id": 872,
+      "title": "Gimme that Groove!",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/872/872.mp3"
+    },
+    {
+      "id": 371,
+      "title": "Cat Walk",
+      "artist": "Arulo",
+      "url": "https://assets.mixkit.co/music/371/371.mp3"
+    },
+    {
+      "id": 288,
+      "title": "One More Dance",
+      "artist": "Arulo",
+      "url": "https://assets.mixkit.co/music/288/288.mp3"
+    },
+    {
+      "id": 684,
+      "title": "Classical vibes 4",
+      "artist": "Grigoriy Nuzhny",
+      "url": "https://assets.mixkit.co/music/684/684.mp3"
+    },
+    {
+      "id": 31,
+      "title": "Dreaming Big",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/31/31.mp3"
+    }
+  ],
+  "energetic": [
+    {
+      "id": 51,
+      "title": "Sports Highlights",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/51/51.mp3"
+    },
+    {
+      "id": 989,
+      "title": "Dirty Thinkin'",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/989/989.mp3"
+    },
+    {
+      "id": 1068,
+      "title": "K.O.",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/1068/1068.mp3"
+    },
+    {
+      "id": 706,
+      "title": "Games Music",
+      "artist": "Grigoriy Nuzhny",
+      "url": "https://assets.mixkit.co/music/706/706.mp3"
+    },
+    {
+      "id": 80,
+      "title": "Daredevil",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/80/80.mp3"
+    },
+    {
+      "id": 157,
+      "title": "Infected Vibes",
+      "artist": "Alejandro Magaña (A. M.)",
+      "url": "https://assets.mixkit.co/music/157/157.mp3"
+    },
+    {
+      "id": 47,
+      "title": "Punked Up Fun",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/47/47.mp3"
+    },
+    {
+      "id": 851,
+      "title": "Me and You",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/851/851.mp3"
+    }
+  ],
+  "motivational": [
+    {
+      "id": 1001,
+      "title": "I Do!",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/1001/1001.mp3"
+    },
+    {
+      "id": 1000,
+      "title": "I Can Hear Your Heartbeat",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/1000/1000.mp3"
+    },
+    {
+      "id": 200,
+      "title": "Oh Lord",
+      "artist": "Arulo",
+      "url": "https://assets.mixkit.co/music/200/200.mp3"
+    },
+    {
+      "id": 1183,
+      "title": "Karma",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/1183/1183.mp3"
+    },
+    {
+      "id": 953,
+      "title": "Feel Alive",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/953/953.mp3"
+    },
+    {
+      "id": 935,
+      "title": "Disco Ain't Old School",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/935/935.mp3"
+    },
+    {
+      "id": 1147,
+      "title": "Midnight Funk",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/1147/1147.mp3"
+    },
+    {
+      "id": 349,
+      "title": "Basketball Training",
+      "artist": "Arulo",
+      "url": "https://assets.mixkit.co/music/349/349.mp3"
+    }
+  ],
+  "inspiring": [
+    {
+      "id": 682,
+      "title": "Classical vibes 2",
+      "artist": "Grigoriy Nuzhny",
+      "url": "https://assets.mixkit.co/music/682/682.mp3"
+    },
+    {
+      "id": 587,
+      "title": "Discover",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/587/587.mp3"
+    },
+    {
+      "id": 710,
+      "title": "Classical 3",
+      "artist": "Jonny S.",
+      "url": "https://assets.mixkit.co/music/710/710.mp3"
+    },
+    {
+      "id": 709,
+      "title": "Classical 2",
+      "artist": "Jonny S.",
+      "url": "https://assets.mixkit.co/music/709/709.mp3"
+    },
+    {
+      "id": 683,
+      "title": "Classical vibes 3",
+      "artist": "Grigoriy Nuzhny",
+      "url": "https://assets.mixkit.co/music/683/683.mp3"
+    },
+    {
+      "id": 713,
+      "title": "Classical 6",
+      "artist": "Jonny S.",
+      "url": "https://assets.mixkit.co/music/713/713.mp3"
+    },
+    {
+      "id": 38,
+      "title": "Forever Love",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/38/38.mp3"
+    },
+    {
+      "id": 148,
+      "title": "Forest Mist Whispers",
+      "artist": "Alejandro Magaña (A. M.)",
+      "url": "https://assets.mixkit.co/music/148/148.mp3"
+    }
+  ],
+  "epic": [
+    {
+      "id": 322,
+      "title": "Life's a Movie",
+      "artist": "Arulo",
+      "url": "https://assets.mixkit.co/music/322/322.mp3"
+    },
+    {
+      "id": 54,
+      "title": "Welcome to The Games",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/54/54.mp3"
+    },
+    {
+      "id": 475,
+      "title": "Majestic",
+      "artist": "Diego Nava",
+      "url": "https://assets.mixkit.co/music/475/475.mp3"
+    },
+    {
+      "id": 846,
+      "title": "I Won't surrender",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/846/846.mp3"
+    },
+    {
+      "id": 957,
+      "title": "I'll Take You to My Heart",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/957/957.mp3"
+    },
+    {
+      "id": 956,
+      "title": "I Wanna Know",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/956/956.mp3"
+    },
+    {
+      "id": 53,
+      "title": "Training",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/53/53.mp3"
+    },
+    {
+      "id": 680,
+      "title": "Epical Drums 05",
+      "artist": "Grigoriy Nuzhny",
+      "url": "https://assets.mixkit.co/music/680/680.mp3"
+    }
+  ],
+  "dramatic": [
+    {
+      "id": 614,
+      "title": "Silent Descent",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/614/614.mp3"
+    },
+    {
+      "id": 493,
+      "title": "Beautiful Dream",
+      "artist": "Diego Nava",
+      "url": "https://assets.mixkit.co/music/493/493.mp3"
+    },
+    {
+      "id": 871,
+      "title": "Fright Night",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/871/871.mp3"
+    },
+    {
+      "id": 676,
+      "title": "Epical Drums 01",
+      "artist": "Grigoriy Nuzhny",
+      "url": "https://assets.mixkit.co/music/676/676.mp3"
+    },
+    {
+      "id": 601,
+      "title": "Skyline",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/601/601.mp3"
+    },
+    {
+      "id": 688,
+      "title": "Classical vibes 5",
+      "artist": "Grigoriy Nuzhny",
+      "url": "https://assets.mixkit.co/music/688/688.mp3"
+    },
+    {
+      "id": 599,
+      "title": "Possible Dreams",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/599/599.mp3"
+    },
+    {
+      "id": 714,
+      "title": "Classical 7",
+      "artist": "Jonny S.",
+      "url": "https://assets.mixkit.co/music/714/714.mp3"
+    }
+  ],
+  "sad": [
+    {
+      "id": 580,
+      "title": "Sun and His Daughter",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/580/580.mp3"
+    },
+    {
+      "id": 22,
+      "title": "Piano Reflections",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/22/22.mp3"
+    },
+    {
+      "id": 52,
+      "title": "The Long Road",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/52/52.mp3"
+    },
+    {
+      "id": 168,
+      "title": "Staring at the Night Sky",
+      "artist": "Alejandro Magaña (A. M.)",
+      "url": "https://assets.mixkit.co/music/168/168.mp3"
+    },
+    {
+      "id": 594,
+      "title": "River Flow",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/594/594.mp3"
+    },
+    {
+      "id": 76,
+      "title": "Epic Games",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/76/76.mp3"
+    },
+    {
+      "id": 520,
+      "title": "Ode to Loneliness",
+      "artist": "Diego Nava",
+      "url": "https://assets.mixkit.co/music/520/520.mp3"
+    },
+    {
+      "id": 41,
+      "title": "Love in the Air",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/41/41.mp3"
+    }
+  ],
+  "romantic": [
+    {
+      "id": 39,
+      "title": "Latin Lovers",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/39/39.mp3"
+    },
+    {
+      "id": 711,
+      "title": "Classical 4",
+      "artist": "Jonny S.",
+      "url": "https://assets.mixkit.co/music/711/711.mp3"
+    },
+    {
+      "id": 717,
+      "title": "Classical 10",
+      "artist": "Jonny S.",
+      "url": "https://assets.mixkit.co/music/717/717.mp3"
+    },
+    {
+      "id": 37,
+      "title": "Love is Eternal",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/37/37.mp3"
+    },
+    {
+      "id": 1081,
+      "title": "We'll Be Okay",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/1081/1081.mp3"
+    },
+    {
+      "id": 40,
+      "title": "Lounging By Moonlight",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/40/40.mp3"
+    },
+    {
+      "id": 854,
+      "title": "Old Letter",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/854/854.mp3"
+    },
+    {
+      "id": 43,
+      "title": "True Love",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/43/43.mp3"
+    }
+  ],
+  "funny": [
+    {
+      "id": 466,
+      "title": "Games Worldbeat",
+      "artist": "Bernardo R.",
+      "url": "https://assets.mixkit.co/music/466/466.mp3"
+    },
+    {
+      "id": 595,
+      "title": "Secret Garden",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/595/595.mp3"
+    },
+    {
+      "id": 644,
+      "title": "Upbeat Jazz",
+      "artist": "Francisco Alvear",
+      "url": "https://assets.mixkit.co/music/644/644.mp3"
+    },
+    {
+      "id": 2,
+      "title": "Comical",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/2/2.mp3"
+    },
+    {
+      "id": 15,
+      "title": "Keep Smiling",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/15/15.mp3"
+    },
+    {
+      "id": 613,
+      "title": "Sicilian Coffee",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/613/613.mp3"
+    },
+    {
+      "id": 9,
+      "title": "Kidding Around",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/9/9.mp3"
+    },
+    {
+      "id": 182,
+      "title": "Love Serenade",
+      "artist": "Andrew Ev",
+      "url": "https://assets.mixkit.co/music/182/182.mp3"
+    }
+  ],
+  "mysterious": [
+    {
+      "id": 139,
+      "title": "Spirit in the Woods",
+      "artist": "Alejandro Magaña (A. M.)",
+      "url": "https://assets.mixkit.co/music/139/139.mp3"
+    },
+    {
+      "id": 565,
+      "title": "Fallen (Asper)",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/565/565.mp3"
+    },
+    {
+      "id": 588,
+      "title": "Feedback Dreams",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/588/588.mp3"
+    },
+    {
+      "id": 138,
+      "title": "Forest Treasure",
+      "artist": "Alejandro Magaña (A. M.)",
+      "url": "https://assets.mixkit.co/music/138/138.mp3"
+    },
+    {
+      "id": 140,
+      "title": "Cyberpunk City",
+      "artist": "Alejandro Magaña (A. M.)",
+      "url": "https://assets.mixkit.co/music/140/140.mp3"
+    },
+    {
+      "id": 612,
+      "title": "Selpan",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/612/612.mp3"
+    },
+    {
+      "id": 464,
+      "title": "Sci-Fi Score",
+      "artist": "Arulo",
+      "url": "https://assets.mixkit.co/music/464/464.mp3"
+    },
+    {
+      "id": 605,
+      "title": "Delirium",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/605/605.mp3"
+    }
+  ],
+  "suspense": [
+    {
+      "id": 671,
+      "title": "Piano Horror",
+      "artist": "Francisco Alvear",
+      "url": "https://assets.mixkit.co/music/671/671.mp3"
+    },
+    {
+      "id": 188,
+      "title": "Echoes",
+      "artist": "Andrew Ev",
+      "url": "https://assets.mixkit.co/music/188/188.mp3"
+    },
+    {
+      "id": 677,
+      "title": "Epical Drums 02",
+      "artist": "Grigoriy Nuzhny",
+      "url": "https://assets.mixkit.co/music/677/677.mp3"
+    },
+    {
+      "id": 679,
+      "title": "Epical Drums 04",
+      "artist": "Grigoriy Nuzhny",
+      "url": "https://assets.mixkit.co/music/679/679.mp3"
+    },
+    {
+      "id": 678,
+      "title": "Epical Drums 03",
+      "artist": "Grigoriy Nuzhny",
+      "url": "https://assets.mixkit.co/music/678/678.mp3"
+    },
+    {
+      "id": 625,
+      "title": "Fragments Of Bangkok",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/625/625.mp3"
+    },
+    {
+      "id": 686,
+      "title": "Epical Drums 06",
+      "artist": "Grigoriy Nuzhny",
+      "url": "https://assets.mixkit.co/music/686/686.mp3"
+    },
+    {
+      "id": 318,
+      "title": "Thunder",
+      "artist": "Arulo",
+      "url": "https://assets.mixkit.co/music/318/318.mp3"
+    }
+  ],
+  "scary": [
+    {
+      "id": 64,
+      "title": "Dark Shadows",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/64/64.mp3"
+    },
+    {
+      "id": 633,
+      "title": "Xanthos",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/633/633.mp3"
+    },
+    {
+      "id": 564,
+      "title": "Goats",
+      "artist": "Eugenio Mininni",
+      "url": "https://assets.mixkit.co/music/564/564.mp3"
+    },
+    {
+      "id": 73,
+      "title": "Torn Threads",
+      "artist": "Ahjay Stelino",
+      "url": "https://assets.mixkit.co/music/73/73.mp3"
+    },
+    {
+      "id": 283,
+      "title": "Trapanomics",
+      "artist": "Arulo",
+      "url": "https://assets.mixkit.co/music/283/283.mp3"
+    },
+    {
+      "id": 892,
+      "title": "Vampires in the City",
+      "artist": "Michael Ramir C.",
+      "url": "https://assets.mixkit.co/music/892/892.mp3"
+    }
+  ]
+}

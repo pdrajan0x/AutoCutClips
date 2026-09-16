@@ -67,10 +67,11 @@ async def get_settings() -> SettingsResponse:
         default_ratio=env.get("DEFAULT_RATIO", "9:16"),
         default_font_style=env.get("DEFAULT_FONT_STYLE", "HORMOZI"),
         default_whisper_model=env.get("DEFAULT_WHISPER_MODEL", "large-v3"),
-        default_whisper_device=env.get("DEFAULT_WHISPER_DEVICE", "cuda"),
+        default_whisper_device=env.get("DEFAULT_WHISPER_DEVICE", "auto"),
         default_ai_provider=env.get("DEFAULT_AI_PROVIDER", "gemini"),
         youtube_cookies_set=os.path.exists(COOKIES_FILE),
         gpu_available=_check_gpu(),
+        max_concurrent_jobs=worker.get_max_concurrent_jobs(),
     )
 
 
@@ -104,6 +105,9 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
         env_updates["DEFAULT_WHISPER_DEVICE"] = req.default_whisper_device.value if hasattr(req.default_whisper_device, "value") else req.default_whisper_device
     if req.default_ai_provider is not None:
         env_updates["DEFAULT_AI_PROVIDER"] = req.default_ai_provider.value if hasattr(req.default_ai_provider, "value") else req.default_ai_provider
+
+    if req.max_concurrent_jobs is not None:
+        worker.set_max_concurrent_jobs(req.max_concurrent_jobs)
 
     worker.set_settings_env(env_updates)
 

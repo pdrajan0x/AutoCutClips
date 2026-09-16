@@ -125,8 +125,13 @@ class JobCreateRequest(BaseModel):
     # Auto-upload to YouTube once the clips are rendered. Handled by the web
     # worker rather than the clipping config, so these are not CLI options.
     auto_upload_youtube: Optional[bool] = None
-    auto_upload_interval_hours: Optional[float] = Field(None, ge=0, le=168)
+    auto_upload_interval_minutes: Optional[float] = Field(None, ge=0, le=10080)
+    auto_upload_interval_hours: Optional[float] = Field(None, ge=0, le=168, description="Deprecated; use minutes")
     auto_upload_privacy: Optional[str] = Field(None, pattern="^(public|unlisted|private)$")
+
+    # Playlist: expand the URL into one job per video, all with these settings.
+    playlist: Optional[bool] = None
+    playlist_limit: Optional[int] = Field(None, ge=1, le=500)
 
     # AI
     ai_provider: Optional[AIProvider] = None
@@ -216,6 +221,7 @@ class SettingsRequest(BaseModel):
     default_whisper_model: Optional[str] = None
     default_whisper_device: Optional[WhisperDevice] = None
     default_ai_provider: Optional[AIProvider] = None
+    max_concurrent_jobs: Optional[int] = Field(None, ge=1, le=8)
 
 
 class SettingsResponse(BaseModel):
@@ -229,9 +235,10 @@ class SettingsResponse(BaseModel):
     default_ratio: str = "9:16"
     default_font_style: str = "HORMOZI"
     default_whisper_model: str = "large-v3"
-    default_whisper_device: str = "cuda"
+    default_whisper_device: str = "auto"
     default_ai_provider: str = "gemini"
     gpu_available: bool = False
+    max_concurrent_jobs: int = 2
 
 
 class SystemHealthResponse(BaseModel):

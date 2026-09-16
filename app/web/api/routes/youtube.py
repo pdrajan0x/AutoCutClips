@@ -384,7 +384,8 @@ async def uploadable_clips():
 
 class QueueAddRequest(BaseModel):
     items: list[dict]  # [{"job_id": "...", "rank": 1}, ...]
-    interval_hours: float = 2.0
+    interval_minutes: Optional[float] = None
+    interval_hours: Optional[float] = None  # deprecated; minutes wins when both are sent
     privacy_status: str = "public"  # "public" | "unlisted" | "private"
     start_at: Optional[str] = None  # ISO datetime; defaults to now
 
@@ -444,12 +445,12 @@ async def get_queue():
 
 def enqueue_clips(
     refs: list[dict],
-    interval_hours: float,
+    interval_minutes: float,
     privacy_status: str,
     start_at: datetime | None = None,
 ) -> list[dict]:
     """
-    Add {"job_id", "rank"} references to the upload queue, spaced by *interval_hours*.
+    Add {"job_id", "rank"} references to the upload queue, spaced by *interval_minutes*.
 
     New items are scheduled after anything already waiting, so queueing a second
     batch does not publish two clips at the same moment.
@@ -491,20 +492,20 @@ def enqueue_clips(
             }
             existing.append(entry)
             added.append(entry)
-            next_slot = next_slot + timedelta(hours=interval_hours)
+            next_slot = next_slot + timedelta(minutes=interval_minutes)
 
         _save_queue(existing)
 
     return added
 
 
-def enqueue_job_clips(job_id: str, interval_hours: float, privacy_status: str) -> list[dict]:
+def enqueue_job_clips(job_id: str, interval_minutes: float, privacy_status: str) -> list[dict]:
     """Queue every successfully rendered clip of *job_id*, best first."""
     rows = [r for r in _manifest_rows(job_id) if r.get("status") == "success"]
     rows.sort(key=lambda r: r.get("viral_score") or 0, reverse=True)
     return enqueue_clips(
         [{"job_id": job_id, "rank": r.get("rank")} for r in rows],
-        interval_hours,
+        interval_minutes,
         privacy_status,
     )
 
@@ -523,7 +524,16 @@ async def add_to_queue(req: QueueAddRequest):
         except ValueError:
             raise HTTPException(400, "start_at must be an ISO datetime, e.g. 2026-09-15T18:00:00Z")
 
-    added = enqueue_clips(req.items, req.interval_hours, req.privacy_status, start)
+    if req.interval_minutes is not None:
+        minutes = req.interval_minutes
+    elif req.interval_hours is not None:
+        minutes = req.interval_hours * 60
+    else:
+        minutes = 60.0
+    if minutes < 0:
+        raise HTTPException(400, "The interval can't be negative.")
+
+    added = enqueue_clips(req.items, minutes, req.privacy_status, start)
     return {"added": added}
 
 
@@ -578,12 +588,17 @@ def _upload_one_queue_item(entry: dict) -> None:
         print(f"[YouTube queue] Upload failed for {entry['title']!r}: {e}")
 
 
-def _scheduler_tick() -> None:
-    """Upload at most one due item per tick, so uploads stay serialized."""
+def _scheduler_tick() -> bool:
+    """
+    Upload at most one due item; True when one was attempted.
+
+    Uploads stay serialized, but they run on this scheduler thread, independent
+    of the clipping jobs, so clips upload while other videos are processing.
+    """
     # Without a token every claim would fail and burn the whole queue; the items
     # should simply wait until the account is connected again.
     if not os.path.exists(TOKEN_FILE):
-        return
+        return False
 
     with _queue_lock:
         items = _load_queue()
@@ -596,7 +611,7 @@ def _scheduler_tick() -> None:
             None,
         )
         if due is None:
-            return
+            return False
         due["status"] = "uploading"
         _save_queue(items)
 
@@ -609,12 +624,16 @@ def _scheduler_tick() -> None:
                 items[i] = due
                 break
         _save_queue(items)
+    return True
 
 
 def _scheduler_loop() -> None:
     while True:
         try:
-            _scheduler_tick()
+            # Several items can be due at once (e.g. a 0-minute interval, or the
+            # backend was offline); work through them without a 30 s gap each.
+            if _scheduler_tick():
+                continue
         except Exception as e:
             print(f"[YouTube queue] Scheduler tick failed: {e}")
         time.sleep(30)

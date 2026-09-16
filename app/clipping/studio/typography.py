@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import threading
 import time
 
 import requests
@@ -153,6 +154,8 @@ def register_fonts_for_libass(font_dir):
 
 
 _PREPARED_FONTS: set = set()
+# Concurrent jobs would otherwise download the same font into the same .part file.
+_FONTS_LOCK = threading.Lock()
 
 
 def prepare_typography_fonts(cfg):
@@ -174,15 +177,19 @@ def prepare_typography_fonts(cfg):
     Raises:
         RuntimeError: If either the primary or secondary required fonts fail to download or validate.
     """
+    # Called once per clip; re-downloading checks and `fc-cache -f` cost seconds
+    # every time, so a session only prepares each font set once.
+    prepared_key = (cfg.active_font_style, os.path.abspath(cfg.font_dir))
+    with _FONTS_LOCK:
+        if prepared_key in _PREPARED_FONTS:
+            return
+        _prepare_fonts(cfg, prepared_key)
+
+
+def _prepare_fonts(cfg, prepared_key):
     font_presets = cfg.font_presets
     style = cfg.active_font_style
     font_dir = cfg.font_dir
-
-    # Called once per clip; re-downloading checks and `fc-cache -f` cost seconds
-    # every time, so a session only prepares each font set once.
-    prepared_key = (style, os.path.abspath(font_dir))
-    if prepared_key in _PREPARED_FONTS:
-        return
 
     f_primary = font_presets[style]["main"]
     f_accent = font_presets[style]["accent"]

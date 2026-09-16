@@ -4,10 +4,14 @@ with a YouTube JSON3 subtitle fast path.
 """
 
 import json
+import threading
 import re
 
 # Loading large-v3 takes tens of seconds; a video queue would pay that per video.
 _MODEL_CACHE: dict = {}
+# Several web jobs can transcribe at once; without the lock two of them could
+# each load a copy of the same multi-GB model.
+_MODEL_LOCK = threading.Lock()
 
 # YouTube subtitle artefacts to strip, applied in order.
 _SUB_CLEANUP = [
@@ -233,16 +237,19 @@ def transcribe_video(
     # each phase — otherwise a first CPU run (model download + full audio
     # decode) looks like a hang.
     cache_key = (model_size, device, compute_type)
-    model = _MODEL_CACHE.get(cache_key)
-    if model is None:
-        print(
-            f"      ⏳ Loading Whisper model '{model_size}' ({device})"
-            " — the first download can take a while...",
-            flush=True,
-        )
-        _MODEL_CACHE.clear()  # keep at most one model in GPU memory
-        model = WhisperModel(model_size, device=device, compute_type=compute_type)
-        _MODEL_CACHE[cache_key] = model
+    with _MODEL_LOCK:
+        model = _MODEL_CACHE.get(cache_key)
+        if model is None:
+            print(
+                f"      ⏳ Loading Whisper model '{model_size}' ({device})"
+                " — the first download can take a while...",
+                flush=True,
+            )
+            # Keep at most one model cached; a job still using an evicted one
+            # holds its own reference, so eviction never breaks a running job.
+            _MODEL_CACHE.clear()
+            model = WhisperModel(model_size, device=device, compute_type=compute_type)
+            _MODEL_CACHE[cache_key] = model
 
     print("      ⏳ Decoding audio & extracting features (no output yet)...", flush=True)
     # vad_filter skips music/silence, where Whisper hallucinates text that then

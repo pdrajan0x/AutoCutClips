@@ -72,6 +72,13 @@ const StudioAPI = (() => {
     });
   }
 
+  async function createPlaylistJobs(payload) {
+    return request('/api/jobs/playlist', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async function deleteJob(jobId) {
     return request(`/api/jobs/${jobId}`, { method: 'DELETE' });
   }
@@ -199,6 +206,7 @@ const StudioAPI = (() => {
     fetchJobs,
     fetchJob,
     createJob,
+    createPlaylistJobs,
     deleteJob,
     fetchSettings,
     updateSettings,

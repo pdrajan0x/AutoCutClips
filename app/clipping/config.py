@@ -10,6 +10,7 @@ import argparse
 import os
 from types import SimpleNamespace
 
+from .bgm_moods import BGM_MOODS
 from .engine.prompt import MAX_CLIP_DURATION, MIN_CLIP_DURATION
 
 try:
@@ -141,15 +142,14 @@ USE_AUTO_BGM = True
 BGM_BASE_VOLUME = 0.12  # music should sit under the voice, not compete with it
 BGM_MODE = "ducking"  # 'ducking' = sidechain compress, 'background' = constant volume mix
 
-# Supported moods (these match the folder names under assets/bgm/)
-BGM_MOODS = ["chill", "epic", "sad", "upbeat", "suspense"]
+# Supported moods (BGM_MOODS, from bgm_moods.py) match the folders under assets/bgm/.
 BGM_DIR = os.path.abspath(os.path.join(BASE_DIR, "assets", "bgm"))
 
 # Whisper
 WHISPER_MODEL = "large-v3"
-WHISPER_DEVICE = "cuda"
+WHISPER_DEVICE = "auto"  # GPU when one is present, otherwise the CPU
 WHISPER_COMPUTE_TYPE = "float16"
-DOWNLOAD_SOURCE_HEIGHT = "max"
+DOWNLOAD_SOURCE_HEIGHT = 1080
 VIDEO_QUALITY_CQ = 23
 VIDEO_QUALITY_CRF = 20
 VIDEO_PRESET = "auto"

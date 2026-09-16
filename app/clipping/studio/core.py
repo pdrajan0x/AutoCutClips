@@ -13,6 +13,7 @@ import subprocess
 import cv2
 
 from .audio_bgm import LOUDNORM_FILTER, build_bgm_filter, get_local_bgm_file
+from .bgm_library import ensure_bgm_library
 from .broll import download_pexels_broll
 from .ffmpeg_utils import (
     build_ffmpeg_progress_cmd,
@@ -50,6 +51,16 @@ def _subtitle_filter(ass_path, cfg):
     return f"subtitles={ffmpeg_filter_path(ass_path)}:fontsdir={ffmpeg_filter_path(cfg.font_dir)}"
 
 
+def _work(cfg, name):
+    """
+    Path for a render intermediate inside the job's own output folder.
+
+    These used to be written to the working directory, where two jobs rendering
+    the same rank at the same time overwrote each other's files.
+    """
+    return os.path.join(cfg.outputs_dir, name)
+
+
 def _run_checked(cmd, output_path, duration, label):
     rc, errors = run_ffmpeg_with_progress(
         build_ffmpeg_progress_cmd(cmd, output_path), duration, label=label
@@ -77,6 +88,13 @@ def _resolve_bgm(clip, cfg):
 
     print(f"   🎵 Looking for a local BGM file (mood: {mood})...")
     path = get_local_bgm_file(mood, bgm_dir)
+    if not path:
+        # The curated library is downloaded on demand rather than kept in git.
+        try:
+            ensure_bgm_library(bgm_dir, [mood, "chill"])
+        except Exception as e:
+            print(f"   ⚠️ Could not fetch the BGM library: {e}")
+        path = get_local_bgm_file(mood, bgm_dir)
     if not path and mood != "chill":
         print("   🔄 Falling back to the chill BGM...")
         path = get_local_bgm_file("chill", bgm_dir)
@@ -284,8 +302,8 @@ def process_clip(rank, clip, ratio, data_segments, cfg, video_encoder, diarizati
     typography_plan = clip.get("typography_plan", [])
     prepare_typography_fonts(cfg)
 
-    h_ts, m_ts, a_hook, a_main = f"h_{rank}.ts", f"m_{rank}.ts", f"ah_{rank}.ass", f"am_{rank}.ass"
-    h_silent, m_silent = f"h_silent_{rank}.mp4", f"m_silent_{rank}.mp4"
+    h_ts, m_ts, a_hook, a_main = _work(cfg, f"h_{rank}.ts"), _work(cfg, f"m_{rank}.ts"), _work(cfg, f"ah_{rank}.ass"), _work(cfg, f"am_{rank}.ass")
+    h_silent, m_silent = _work(cfg, f"h_silent_{rank}.mp4"), _work(cfg, f"m_silent_{rank}.mp4")
 
     # --hook-source always plays its clip as the teaser; otherwise the teaser is opt-in.
     hook_enabled = bool(getattr(cfg, "hook_teaser", False) or custom_hook)
@@ -324,7 +342,7 @@ def process_clip(rank, clip, ratio, data_segments, cfg, video_encoder, diarizati
     if cfg.use_broll and broll_list:
         print(f"   🎥 Downloading {len(broll_list)} B-roll video(s) from Pexels...")
         for i, br in enumerate(broll_list):
-            file_broll = f"temp_broll_{rank}_{i}.mp4"
+            file_broll = _work(cfg, f"temp_broll_{rank}_{i}.mp4")
             if download_pexels_broll(br.get("search_query", "nature"), ratio, file_broll, cfg.pexels_api_key):
                 active_broll.append(dict(br, filepath=file_broll))
 
@@ -377,9 +395,9 @@ def process_clip(rank, clip, ratio, data_segments, cfg, video_encoder, diarizati
 
             for idx, seg in enumerate(keep_segments):
                 s_start, s_end = float(seg["start_time"]), float(seg["end_time"])
-                s_silent = f"m_seg_silent_{rank}_{idx}.mp4"
-                s_ass = f"m_seg_ass_{rank}_{idx}.ass"
-                s_ts = f"m_seg_ts_{rank}_{idx}.ts"
+                s_silent = _work(cfg, f"m_seg_silent_{rank}_{idx}.mp4")
+                s_ass = _work(cfg, f"m_seg_ass_{rank}_{idx}.ass")
+                s_ts = _work(cfg, f"m_seg_ts_{rank}_{idx}.ts")
 
                 _render_visual(
                     cfg, ratio, cfg.source_video_path, s_silent, s_start, s_end,
@@ -412,7 +430,7 @@ def process_clip(rank, clip, ratio, data_segments, cfg, video_encoder, diarizati
 
             if file_bgm:
                 print("   🎵 Applying BGM to the trimmed clip...")
-                m_ts_bgm = f"m_bgm_{rank}.ts"
+                m_ts_bgm = _work(cfg, f"m_bgm_{rank}.ts")
                 cmd_bgm = [
                     "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
                     "-i", m_ts, "-stream_loop", "-1", "-i", file_bgm,
@@ -506,11 +524,11 @@ def process_clip(rank, clip, ratio, data_segments, cfg, video_encoder, diarizati
 
 
 def _cleanup(rank, cfg, keep_segments, active_broll):
-    files = [f"h_{rank}.ts", f"m_{rank}.ts", f"ah_{rank}.ass", f"am_{rank}.ass",
-             f"h_silent_{rank}.mp4", f"m_silent_{rank}.mp4", f"m_bgm_{rank}.ts"]
+    files = [_work(cfg, f"h_{rank}.ts"), _work(cfg, f"m_{rank}.ts"), _work(cfg, f"ah_{rank}.ass"), _work(cfg, f"am_{rank}.ass"),
+             _work(cfg, f"h_silent_{rank}.mp4"), _work(cfg, f"m_silent_{rank}.mp4"), _work(cfg, f"m_bgm_{rank}.ts")]
     for idx in range(len(keep_segments or [])):
-        files += [f"m_seg_silent_{rank}_{idx}.mp4", f"m_seg_ass_{rank}_{idx}.ass",
-                  f"m_seg_ts_{rank}_{idx}.ts"]
+        files += [_work(cfg, f"m_seg_silent_{rank}_{idx}.mp4"), _work(cfg, f"m_seg_ass_{rank}_{idx}.ass"),
+                  _work(cfg, f"m_seg_ts_{rank}_{idx}.ts")]
     files += [
         os.path.join(cfg.outputs_dir, name)
         for name in (f"vo_intro_{rank}.ts", f"vo_subs_{rank}.ass", f"vo_bg_{rank}.jpg")

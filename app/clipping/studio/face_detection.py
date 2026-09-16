@@ -1,4 +1,5 @@
 import os
+import threading
 import urllib.request
 
 import cv2
@@ -7,7 +8,10 @@ from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 
 
-_FACE_DETECTOR = None
+# MediaPipe detectors are not safe to share between threads, and concurrent web
+# jobs run on different threads, so each thread gets its own detector.
+_LOCAL = threading.local()
+_DOWNLOAD_LOCK = threading.Lock()
 
 def get_face_detector(cfg):
     """
@@ -21,29 +25,29 @@ def get_face_detector(cfg):
 
     Side Effects:
         Downloads the Mediapipe face detection model from the internet if it doesn't exist locally.
-        Initializes a global `_FACE_DETECTOR` variable.
+        Caches one detector per thread.
 
     Raises:
         urllib.error.URLError: If the model download fails.
         Exception: If Mediapipe initialization fails due to invalid model format.
     """
-    global _FACE_DETECTOR
-
-    if _FACE_DETECTOR is None:
-        if not os.path.exists(cfg.file_mediapipe_model):
-            urllib.request.urlretrieve(
-                cfg.url_mediapipe_model, cfg.file_mediapipe_model
-            )
+    detector = getattr(_LOCAL, "detector", None)
+    if detector is None:
+        with _DOWNLOAD_LOCK:
+            if not os.path.exists(cfg.file_mediapipe_model):
+                tmp = cfg.file_mediapipe_model + ".part"
+                urllib.request.urlretrieve(cfg.url_mediapipe_model, tmp)
+                os.replace(tmp, cfg.file_mediapipe_model)
 
         base_options = mp_python.BaseOptions(model_asset_path=cfg.file_mediapipe_model)
-        _FACE_DETECTOR = mp_vision.FaceDetector.create_from_options(
+        detector = _LOCAL.detector = mp_vision.FaceDetector.create_from_options(
             mp_vision.FaceDetectorOptions(
                 base_options=base_options,
                 min_detection_confidence=0.5,
             )
         )
 
-    return _FACE_DETECTOR
+    return detector
 
 
 def estimate_speaker_count_from_video(video_path: str, cfg) -> int:
