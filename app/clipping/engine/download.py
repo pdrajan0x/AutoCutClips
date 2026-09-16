@@ -33,15 +33,54 @@ _NO_JS_RUNTIME_HINT = (
     "      setup cell — it installs Deno for exactly this reason."
 )
 
-_NO_FORMAT_HINT = (
-    "YouTube offered no downloadable format to any player client. Most likely causes:\n"
-    "      1) No JavaScript runtime — see the warning above; this is the usual cause\n"
-    "         on Colab/Kaggle and it never mentions JavaScript in the error itself.\n"
-    "      2) Stale cookies — re-export cookies.txt from a logged-in browser\n"
-    "      3) Outdated yt-dlp: pip install -U yt-dlp\n"
-    "      4) Check the format list printed above — if it is empty, the video itself\n"
-    "         may be members-only, age-restricted or region-blocked for this IP."
-)
+def _no_format_hint(ydl_opts: dict) -> str:
+    """
+    Explain a no-format failure using the environment as it actually is.
+
+    A fixed list of "most likely causes" sends people chasing the wrong one, so
+    the state that decides the answer — runtime, cookies, yt-dlp version — is
+    measured here and reported instead of guessed at.
+    """
+    runtime = ytdl.available_js_runtime()
+    cookies = ydl_opts.get("cookiefile")
+
+    try:
+        from yt_dlp.version import __version__ as ydl_version
+    except ImportError:
+        ydl_version = "unknown"
+
+    lines = [
+        "YouTube offered no downloadable format to any player client.",
+        "",
+        "      Environment at the time of failure:",
+        f"        JS runtime : {runtime or 'MISSING'}",
+        f"        cookies    : {cookies or 'none'}",
+        f"        yt-dlp     : {ydl_version}",
+        "",
+    ]
+
+    if not runtime:
+        lines += [
+            "      No JavaScript runtime, which is almost certainly the cause: yt-dlp",
+            "      cannot solve YouTube's signature challenges without one and silently",
+            "      drops every format it cannot decrypt. Install one with:",
+            "        python -m app.clipping.jsruntime",
+            "      On Colab/Kaggle, re-run the notebook's setup cell.",
+        ]
+    else:
+        lines += [
+            "      A JS runtime is present, so signature solving is not the problem.",
+            "      Check the warnings and format list above, then:",
+            f"      1) Re-export cookies.txt — {'the current file may be stale' if cookies else 'none is configured'}."
+            " Use a private/incognito",
+            "         window: log in, export, then close it WITHOUT logging out, so",
+            "         YouTube cannot rotate the session and invalidate the export.",
+            "      2) Update yt-dlp: pip install -U yt-dlp",
+            "      3) If the format list above is empty, the video itself may be",
+            "         members-only, age-restricted or region-blocked for this IP.",
+        ]
+
+    return "\n".join(lines)
 
 # YouTube's default `web` client increasingly returns SABR-only responses from
 # datacenter IPs (Colab/Kaggle): extraction succeeds but nothing is downloadable,
@@ -440,7 +479,7 @@ def download_video(
                 continue
         else:
             _log_available_formats(ydl_opts, url)
-            raise RuntimeError(f"{e}\n      {_NO_FORMAT_HINT}") from e
+            raise RuntimeError(f"{e}\n      {_no_format_hint(ydl_opts)}") from e
 
     if not os.path.exists(output_path):
         raise RuntimeError(
