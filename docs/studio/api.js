@@ -76,6 +76,41 @@ const StudioAPI = (() => {
     return request(`/api/jobs/${jobId}`, { method: 'DELETE' });
   }
 
+  // ---- Video file upload ----
+  /**
+   * Upload a local video to the backend, returning its stored filename.
+   *
+   * Uses XHR rather than fetch so the caller can show real progress — these are
+   * video files, and a multi-minute upload with no feedback looks like a hang.
+   * The Content-Type header is deliberately not set: the browser has to add the
+   * multipart boundary itself.
+   */
+  function uploadVideo(file, onProgress) {
+    const base = getBackendUrl();
+    if (!base) return Promise.reject(new Error('Backend URL not configured. Please connect first.'));
+
+    return new Promise((resolve, reject) => {
+      const form = new FormData();
+      form.append('file', file);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${base}/api/upload`);
+      xhr.setRequestHeader('ngrok-skip-browser-warning', 'true');
+
+      xhr.upload.onprogress = (e) => {
+        if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total);
+      };
+      xhr.onload = () => {
+        let body = {};
+        try { body = JSON.parse(xhr.responseText); } catch { /* non-JSON error page */ }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(body);
+        else reject(new Error(body.detail || `Upload failed: ${xhr.status}`));
+      };
+      xhr.onerror = () => reject(new Error('Upload failed: the connection dropped.'));
+      xhr.send(form);
+    });
+  }
+
   // ---- Settings ----
   async function fetchSettings() {
     return request('/api/settings');
@@ -200,6 +235,7 @@ const StudioAPI = (() => {
     fetchJob,
     createJob,
     deleteJob,
+    uploadVideo,
     fetchSettings,
     updateSettings,
     createSSE,

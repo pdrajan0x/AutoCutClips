@@ -103,18 +103,13 @@ def clip_duration_bounds(cfg=None) -> tuple[float, float]:
 
 def _length_rule(cfg) -> str:
     low, high = clip_duration_bounds(cfg)
-    sweet = max(low, min(SWEET_SPOT_MAX_DURATION, high))
-    rule = (
-        f"- Duration must be {low:g}-{high:g} seconds. Prefer the SHORTEST cut that fully lands the idea"
+    return (
+        f"- Duration must be {low:g}-{high:g} seconds. Do NOT optimise for the shortest possible cut.\n"
+        f"  Give the moment the room it needs: keep the complete thought, the full exchange and the\n"
+        f"  build-up that makes the payoff land. A clip that runs to {high:g} seconds and feels whole is\n"
+        f"  better than a {low:g}-second one that feels clipped or rushed.\n"
+        f"  Only stop early when everything after the payoff is genuinely dead weight."
     )
-    if sweet < high:
-        rule += (
-            f" — most great clips are {low:g}-{sweet:g} seconds.\n"
-            f"  Only go past {sweet:g} seconds for a story whose payoff genuinely needs the room."
-        )
-    else:
-        rule += "."
-    return rule
 
 
 def _account_routing_section(accounts: dict) -> str:
@@ -237,12 +232,18 @@ def _segment_trim_section(cfg) -> str:
     return f"""
 
 SEGMENT-BASED TRIMMING (KEEP SEGMENTS — REQUIRED):
-- Every cut inside a clip is a visible jump cut, so only cut what clearly hurts retention: a tangent, a
-  false start, a long pause, crosstalk or filler lasting more than ~2 seconds.
-- If so, break the clip into "keep_segments" — at most 4 — keeping only the parts that carry the idea.
+- DEFAULT TO NOT CUTTING. Every cut inside a clip is a visible jump cut that breaks the flow of the
+  conversation, so leaving the clip continuous is usually the better choice.
+- Only cut something that is genuinely dead: a clear tangent that leaves the topic, a false start, dead air or
+  crosstalk lasting more than ~2 seconds. Never cut merely to make the clip shorter or tighter.
+- Never cut mid-explanation, mid-story or mid-exchange. If removing a part would leave the remaining audio
+  sounding like a jump in logic — a question without its answer, a conclusion without its reasoning, a
+  punchline without its setup — keep it.
+- If you do cut, break the clip into "keep_segments" — at most 4 — keeping every part that carries the idea.
 - Every segment starts and ends on a sentence boundary. Never cut inside a sentence.
 - Segments must be in chronological order, must not overlap, and must add up to at least {low:g} seconds.
-- If the whole clip is already tight, emit a single segment covering start_time to end_time.{silence_hint}
+- If the clip flows well as-is — which is the common case — emit a SINGLE segment covering start_time to
+  end_time.{silence_hint}
 - Fill the "keep_segments" field as an array of objects (start_time, end_time).
 """
 
@@ -333,6 +334,24 @@ HOW SHORT-FORM VIEWERS ACTUALLY BEHAVE (the reason for every rule below):
 - They have never seen this episode. They do not know the speakers, the earlier discussion or the context.
 - They reward ONE clear idea delivered fast, and they punish setup, rambling and endings that fizzle out.
 
+STEP 0 — UNDERSTAND WHAT THIS VIDEO IS (internally, do not output it):
+Before selecting anything, read the whole transcript and decide what kind of video this is and what its
+point is. What is the creator actually trying to do, and what would make a viewer of THIS video happy?
+Classify it as one of: educational/tutorial, interview/podcast conversation, comedy/entertainment,
+story or narrative, motivational/inspirational, commentary/opinion/news, review/product, music/performance,
+or something else. Then judge every candidate by what makes that kind of video good, not by a generic formula:
+- Educational/tutorial: a complete, self-contained explanation a viewer can actually learn from and act on.
+  Keep the full reasoning — a lesson cut before the "why" is worthless. Never strand a step mid-explanation.
+- Interview/podcast: the real exchange, including the question when it sets up the answer. Keep the back-and-forth
+  intact; a reply severed from what prompted it reads as a non sequitur.
+- Comedy/entertainment: the whole bit. Setup, build and punchline all inside the clip — a punchline without its
+  setup is not funny. Keep the laugh or reaction that follows it.
+- Story/narrative: the arc — situation, turn, resolution. Do not cut before the resolution lands.
+- Motivational: the full build to the emotional peak, not just the peak line.
+- Commentary/opinion: the claim together with the reasoning behind it, so it does not read as a bare assertion.
+- Review/product: the verdict plus the reason for it.
+Say which type you decided in each clip's "reason" field, so the choice is visible.
+
 STEP 1 — BUILD A CANDIDATE POOL (internally, do not output it):
 Read the WHOLE transcript first. Internally list about {clip_count * 3} candidate moments, then keep only the best.
 A strong candidate usually has one of these shapes:
@@ -364,7 +383,12 @@ REJECT THESE OUTRIGHT (never return them as clips):
 - Long setups where the payoff lands outside the clip window.
 - Inside jokes or references that need the rest of the episode to land.
 
-STEP 3 — CUT PRECISELY:
+STEP 3 — CUT PRECISELY (BUT KEEP THE MOMENT WHOLE):
+- Never cut in the middle of a conversation, an explanation, a story or a joke. The clip must contain the
+  complete thought from beginning to end. If a speaker is mid-point at your proposed end_time, extend to where
+  they actually finish — or pick a different moment. A clip that stops mid-idea is worse than no clip.
+- Keep an exchange together. If a reply only makes sense with the question, or a reaction only lands with the
+  line that caused it, include both. Do not strand one half of a back-and-forth.
 - start_time = the start of the line containing the first strong sentence. If the best material begins in the
   middle of an answer, start there. Include the interviewer's question only when it is short (under ~5 seconds),
   sharp, and the answer needs it.

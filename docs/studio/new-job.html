@@ -99,8 +99,9 @@
                         </h3>
 
                         <!-- Mode Toggle -->
-                        <div class="flex gap-2 mb-5">
+                        <div class="flex gap-2 mb-5 flex-wrap">
                             <button type="button" onclick="setMode('url')" id="mode-url-btn" class="px-4 py-2 rounded-lg text-xs font-semibold transition-all bg-brand-600 text-white shadow-md">🔗 From URL</button>
+                            <button type="button" onclick="setMode('upload')" id="mode-upload-btn" class="px-4 py-2 rounded-lg text-xs font-semibold transition-all border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800">⬆️ Upload File</button>
                             <button type="button" onclick="setMode('reuse')" id="mode-reuse-btn" class="px-4 py-2 rounded-lg text-xs font-semibold transition-all border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800">🔁 Reuse Job</button>
                         </div>
 
@@ -121,6 +122,29 @@
                                     <option value="gdrive">Google Drive</option>
                                 </select>
                             </div>
+                        </div>
+
+                        <!-- Upload Mode -->
+                        <div id="mode-upload-panel" class="hidden">
+                            <label for="input-file" class="block cursor-pointer">
+                                <div id="drop-zone" class="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl px-4 py-8 text-center hover:border-brand-500 hover:bg-brand-50/40 dark:hover:bg-brand-950/20 transition-colors">
+                                    <i data-lucide="upload-cloud" class="w-8 h-8 mx-auto text-slate-400 mb-2"></i>
+                                    <div id="file-label" class="text-sm font-medium text-slate-700 dark:text-slate-200">Click to choose a video file</div>
+                                    <p class="text-xs text-slate-400 mt-1">MP4, MKV, MOV, WEBM, AVI, FLV or TS — up to 2 GB</p>
+                                </div>
+                            </label>
+                            <input id="input-file" type="file" class="hidden" accept=".mp4,.mkv,.mov,.webm,.avi,.flv,.ts" onchange="onFileChosen()">
+
+                            <div id="upload-progress-wrap" class="hidden mt-3">
+                                <div class="h-2 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                                    <div id="upload-progress-bar" class="h-full bg-brand-600 transition-all" style="width:0%"></div>
+                                </div>
+                                <p id="upload-progress-text" class="text-xs text-slate-400 mt-1.5">Uploading…</p>
+                            </div>
+
+                            <p class="text-xs text-slate-400 mt-3">
+                                Uploading skips the download step entirely, so it also sidesteps YouTube's bot check.
+                            </p>
                         </div>
 
                         <!-- Reuse Mode -->
@@ -314,19 +338,28 @@
 
         function setMode(mode) {
             currentMode = mode;
-            const urlBtn = document.getElementById('mode-url-btn');
-            const reuseBtn = document.getElementById('mode-reuse-btn');
-            const urlPanel = document.getElementById('mode-url-panel');
-            const reusePanel = document.getElementById('mode-reuse-panel');
 
             const activeClass = 'bg-brand-600 text-white shadow-md';
             const inactiveClass = 'border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800';
 
-            urlBtn.className = `px-4 py-2 rounded-lg text-xs font-semibold transition-all ${mode === 'url' ? activeClass : inactiveClass}`;
-            reuseBtn.className = `px-4 py-2 rounded-lg text-xs font-semibold transition-all ${mode === 'reuse' ? activeClass : inactiveClass}`;
+            ['url', 'upload', 'reuse'].forEach(m => {
+                document.getElementById(`mode-${m}-btn`).className =
+                    `px-4 py-2 rounded-lg text-xs font-semibold transition-all ${mode === m ? activeClass : inactiveClass}`;
+                document.getElementById(`mode-${m}-panel`).classList.toggle('hidden', mode !== m);
+            });
+        }
 
-            urlPanel.classList.toggle('hidden', mode !== 'url');
-            reusePanel.classList.toggle('hidden', mode !== 'reuse');
+        function onFileChosen() {
+            const file = document.getElementById('input-file').files[0];
+            const label = document.getElementById('file-label');
+            if (!file) {
+                label.textContent = 'Click to choose a video file';
+                return;
+            }
+            const mb = file.size / (1024 * 1024);
+            const size = mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`;
+            label.textContent = `${file.name} (${size})`;
+            document.getElementById('drop-zone').classList.add('border-brand-500');
         }
 
         async function handleSubmit(e) {
@@ -352,6 +385,11 @@
             }
             if (currentMode === 'reuse' && !document.getElementById('input-reuse-id').value.trim()) {
                 errorText.textContent = 'Job ID cannot be empty';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+            if (currentMode === 'upload' && !document.getElementById('input-file').files[0]) {
+                errorText.textContent = 'Choose a video file to upload first';
                 errorEl.classList.remove('hidden');
                 return;
             }
@@ -381,6 +419,25 @@
                     payload.url = document.getElementById('input-url').value.trim();
                 } else if (currentMode === 'reuse') {
                     payload.reuse_job_id = document.getElementById('input-reuse-id').value.trim();
+                } else if (currentMode === 'upload') {
+                    // The file has to reach the backend before the job can reference it.
+                    const file = document.getElementById('input-file').files[0];
+                    const wrap = document.getElementById('upload-progress-wrap');
+                    const bar = document.getElementById('upload-progress-bar');
+                    const text = document.getElementById('upload-progress-text');
+
+                    wrap.classList.remove('hidden');
+                    btn.innerHTML = '<span class="spinner"></span> Uploading...';
+
+                    const result = await StudioAPI.uploadVideo(file, (fraction) => {
+                        const pct = Math.round(fraction * 100);
+                        bar.style.width = `${pct}%`;
+                        text.textContent = pct < 100 ? `Uploading… ${pct}%` : 'Finishing upload…';
+                    });
+
+                    text.textContent = `Uploaded: ${result.filename}`;
+                    payload.upload_filename = result.filename;
+                    btn.innerHTML = '<span class="spinner"></span> Starting job...';
                 }
 
                 // Add toggles
