@@ -176,16 +176,32 @@ def transcribe_video(
 
         if device == "auto":
             device = "cuda" if gpu_ok else "cpu"
-        elif device == "cuda" and not gpu_ok:
+        elif not gpu_ok:
             print(
                 "      ⚠️ CUDA requested but no GPU is available — falling back to CPU. "
                 "This run will be slower.",
                 flush=True,
             )
             device = "cpu"
-            if compute_type == "float16":
-                # float16 needs a GPU; int8 is the safe/fast default on CPU.
-                compute_type = "int8"
+
+    # Checked against the resolved device rather than inside a fallback branch:
+    # float16 needs a GPU, so ending up on the CPU by *any* route (auto-detect,
+    # fallback, or an explicit --whisper-device cpu) must drop it, or
+    # ctranslate2 raises "Requested float16 compute type, but the target device
+    # or backend do not support efficient float16 computation".
+    if device == "cpu" and "float16" in compute_type:
+        print(
+            f"      ℹ️ {compute_type} needs a GPU; using int8 on the CPU instead.",
+            flush=True,
+        )
+        compute_type = "int8"
+
+    if device == "cpu" and model_size.startswith("large"):
+        print(
+            f"      ⚠️ Whisper '{model_size}' on the CPU is very slow — expect several minutes "
+            "per minute of audio. Pick a smaller model if this run needs to finish sooner.",
+            flush=True,
+        )
 
     # faster-whisper is silent until the first segment is produced, so announce
     # each phase — otherwise a first CPU run (model download + full audio
